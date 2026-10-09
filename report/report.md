@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 |------|------|
 | **实验名称** | Lab 1: 比麻雀更小的麻雀（最小可执行内核） |
-| **小组成员** | 2413195-钟沁涵、学号2-姓名2、学号3-姓名3 |
+| **小组成员** | 2413195-钟沁涵、2413467-徐熙凯、学号3-姓名3 |
 | **完成日期** | 2026-10-10 |
 
 ### 小组分工
@@ -51,12 +51,31 @@
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|------------|---------|------|
 | 2413195-钟沁涵 | ChatGPT | GPT-6 | 辅助分析 RISC-V 内核入口、栈初始化及内核启动流程，指导 QEMU/GDB 调试与问题排查 |
-| 学号2-姓名2 | | | |
+| 2413467-徐熙凯 | Codex | GPT-6 | 辅助按指导书搭建与验证 WSL 实验环境，分步指导练习2的 GDB 调试；读取日志核对寄存器和启动地址，并协助整理截图、提示词及报告 |
 | 学号3-姓名3 | | | |
 
 **说明：**
 - **AI 编程工具**：指具体使用的终端工具、编辑器插件、桌面应用或浏览器界面
 - **底层模型**：指该工具使用的大语言模型及版本
+
+### 成员2的实验运行环境
+
+**成员：** 2413467-徐熙凯；负责练习2的启动流程调试与验证。
+
+| 项目 | 配置与用途 |
+|------|------------|
+| 宿主与实验系统 | Windows + WSL2（Ubuntu）；编译、QEMU 和 GDB 均在 WSL Linux 环境中运行 |
+| 编辑与终端 | VS Code，通过 WSL 扩展连接 Ubuntu；使用两个集成终端分别运行 QEMU 和 GDB |
+| RISC-V 工具链 | SiFive 官方预编译 `riscv64-unknown-elf` 工具链，GCC-Metal `10.2.0-2020.12.8`，GCC 版本 `10.2.0` |
+| QEMU | 官方源码编译安装的 `qemu-system-riscv64`，版本 `4.1.1`，模拟 RISC-V 64 位 `virt` 平台 |
+| 固件 | QEMU 4.1.1 自带的 OpenSBI `v0.4`，通过 `-bios default` 使用 |
+| GDB | 工具链自带的 `riscv64-unknown-elf-gdb`，SiFive GDB-Metal `10.1.0-2020.12.7`，GDB 版本 `10.1` |
+| 小组仓库与分支 | `CheriaAshley/OS48Team`；工作分支 `lab1-exercise2`，基于队友的 `lab1` 分支 |
+| 实验目录 | Windows：`E:\os_team\OS48Team\code`；WSL：`/mnt/e/os_team/OS48Team/code` |
+| 调试方式 | 使用原始 `make debug` 启动 QEMU，再通过 `make gdb` 连接 `localhost:1234`；加载 `bin/kernel` 的符号信息 |
+| 调试记录 | GDB 日志 `report/lab1-exercise2-gdb.log`，截图保存在 `report/images/lab1_exercise2_*.png` |
+
+本次环境已完成编译和调试连接验证，并在练习2中实际观察到 `0x1000 → 0x80000000 → 0x80200000` 的启动路径。成员1与成员2使用的固件及启动配置不同，各自的操作和结果分别记录在对应练习中。
 
 ---
 
@@ -292,6 +311,234 @@ Domain0 Next Address : 0x0000000080200000
 
 ---
 
+### 练习2：使用 GDB 验证启动流程
+
+**负责人：** [2413467-徐熙凯]
+
+1. 实验任务
+
+使用 GDB 跟踪 QEMU 模拟的 RISC-V 从加电开始，到进入内核第一条指令（地址 `0x80200000`）的过程。通过观察程序计数器、寄存器、内存和反汇编结果，回答最初几条指令的位置及其主要功能，并验证固件向内核移交控制权的过程。
+
+本练习在练习1已有代码的基础上完成，使用 `lab1-exercise2` 分支，不需要修改内核源码。任务要求参考[实验指导书：练习2](http://oslab.mobisys.top/lab2026/_book/lab1/lab1_2_1_exercise.html)。
+
+2. 调试环境与启动方法
+
+本次使用 Windows 上的 VS Code 远程连接 WSL Ubuntu，在 WSL 终端中运行交叉编译工具、QEMU 和 GDB。QEMU 版本为 `4.1.1`，工具链为 SiFive `riscv64-unknown-elf` GCC `10.2.0`，GDB 为 SiFive GDB-Metal `10.1`。本次环境能够使用项目原始 Makefile 中的 `-device loader` 启动方式，不需要使用练习1中的 `-kernel` 对照命令。
+
+在终端A中执行：
+
+```bash
+source ~/.bashrc
+cd /mnt/e/os_team/OS48Team/code
+make debug
+```
+
+Makefile 使用 `-s -S` 启动 QEMU。其中，`-s` 开启 TCP 1234 端口上的 GDB 调试服务，`-S` 使 CPU 在启动时暂停，等待调试器控制。因此，`make debug` 完成编译后没有继续输出，是暂停等待调试的正常表现。
+
+保持终端A运行，在终端B的相同目录执行：
+
+```bash
+source ~/.bashrc
+cd /mnt/e/os_team/OS48Team/code
+make gdb
+```
+
+GDB 加载 `bin/kernel` 的符号信息，设置目标架构为 `riscv:rv64`，并连接 `localhost:1234`。连接成功后，初始位置为 `0x0000000000001000 in ?? ()`。这里的 `??` 表示当前加载的内核符号无法标识该地址处的函数，不代表调试失败。
+
+为保存实际调试输出，在 GDB 中执行：
+
+```gdb
+set pagination off
+set logging file ../report/lab1-exercise2-gdb.log
+set logging on
+```
+
+完整输出保存在 [GDB 调试日志](./lab1-exercise2-gdb.log)。
+
+3. 调试过程与观察结果
+
+（1）观察加电后最初的执行地址和指令
+
+在 CPU 尚未继续运行时，执行：
+
+```gdb
+info registers pc
+x/5i $pc
+```
+
+实际结果如下：
+
+```text
+pc             0x1000   0x1000
+=> 0x1000: auipc t0,0x0
+   0x1004: addi  a1,t0,32
+   0x1008: csrr  a0,mhartid
+   0x100c: ld    t0,24(t0)
+   0x1010: jr    t0
+```
+
+这说明在本实验的 QEMU `virt` 环境中，CPU 最初执行的是位于 `0x1000` 的复位启动代码，而不是直接执行 `0x80200000` 处的内核代码。
+
+![练习2：复位入口与最初五条指令](./images/lab1_exercise2_reset.png)
+
+（2）单步观察启动参数的准备过程
+
+首先执行第一条指令，并查看寄存器：
+
+```gdb
+si
+info registers pc t0
+x/i $pc
+```
+
+执行 `auipc t0,0x0` 后，`pc` 变为 `0x1004`，`t0` 为 `0x1000`。该指令将自身的 PC 与立即数对应的偏移相加，偏移为零，因此 `t0` 保存了复位代码的起始地址。
+
+![练习2：单步执行后保存复位入口地址](./images/lab1_exercise2_reset_base.png)
+
+随后依次执行：
+
+```gdb
+si
+info registers pc a1
+x/i $pc
+si
+info registers pc a0
+x/i $pc
+```
+
+执行 `addi a1,t0,32` 后，`a1 = 0x1020`，`pc = 0x1008`；执行 `csrr a0,mhartid` 后，`a0 = 0`，`pc = 0x100c`。前者设置传给固件的地址参数，后者读取当前硬件线程的编号。本次启动线程的编号为0。
+
+结合 [QEMU 4.1.1 的 virt 平台源码](https://github.com/qemu/qemu/blob/v4.1.1/hw/riscv/virt.c#L393)，复位向量后紧接着放置设备树，`0x1020` 是该版本传给固件的设备树地址。因此，寄存器观测得到的数值与平台源码的布局相符。
+
+![练习2：准备地址参数与硬件线程编号](./images/lab1_exercise2_boot_args.png)
+
+（3）读取固件入口地址并跳转到 OpenSBI
+
+当前 `t0 = 0x1000`，因此 `ld t0,24(t0)` 读取的内存地址为 `0x1018`。先检查该地址，再单步执行：
+
+```gdb
+x/gx 0x1018
+si
+info registers pc t0
+x/i $pc
+```
+
+实际结果如下：
+
+```text
+0x1018:        0x0000000080000000
+pc             0x1010   0x1010
+t0             0x80000000
+=> 0x1010:     jr t0
+```
+
+这里 `x/gx` 按8字节、十六进制格式查看内存，观察到保存的固件入口地址为 `0x80000000`。执行 `ld` 后，该地址进入 `t0`。
+
+接着执行：
+
+```gdb
+si
+info registers pc
+x/5i $pc
+```
+
+执行 `jr t0` 后，观察到：
+
+```text
+pc             0x80000000   0x80000000
+=> 0x80000000: csrr  a6,mhartid
+   0x80000004: bgtz  a6,0x80000108
+   0x80000008: auipc t0,0x0
+   0x8000000c: addi  t0,t0,1032
+   0x80000010: auipc t1,0x0
+```
+
+这验证了 CPU 从复位代码跳转到 OpenSBI 的入口。需要区分：`0x1000` 是 QEMU 提供的复位跳转代码，`0x80000000` 才是本次 OpenSBI 固件的入口。
+
+![练习2：读取固件入口并跳转到 OpenSBI](./images/lab1_exercise2_opensbi.png)
+
+（4）设置断点，验证进入内核入口
+
+为了避免逐条跟踪固件中的大量指令，在内核入口设置断点，然后继续运行：
+
+```gdb
+break *0x80200000
+continue
+```
+
+实际命中结果如下：
+
+```text
+Breakpoint 1, kern_entry () at kern/init/entry.S:7
+7       la sp, bootstacktop
+```
+
+随后执行 `x/5i $pc`，得到：
+
+```asm
+=> 0x80200000 <kern_entry>:   auipc sp,0x3
+   0x80200004 <kern_entry+4>: mv    sp,sp
+   0x80200008 <kern_entry+8>: j     0x8020000a <kern_init>
+   0x8020000a <kern_init>:    auipc a0,0x3
+   0x8020000e <kern_init+4>:  addi  a0,a0,-2
+```
+
+GDB 将当前地址对应到 `entry.S` 第7行，表明执行流程已经到达内核汇编入口。源码中的 `la sp, bootstacktop` 是伪指令，在本次编译结果中对应 `auipc sp,0x3` 和 `mv sp,sp`；后面的跳转进入 `kern_init`，与练习1的分析一致。此时停在内核第一条机器指令执行之前，尚未通过单步操作执行内核栈初始化。
+
+截图中还出现了在相同地址重复设置的断点2，这是命中断点后重复输入 `break *0x80200000` 造成的，不影响本次验证结果。
+
+![练习2：命中内核入口断点并查看机器指令](./images/lab1_exercise2_kernel_breakpoint.png)
+
+最后补充检查程序计数器并关闭日志：
+
+```gdb
+info registers pc
+set logging off
+```
+
+结果为 `pc = 0x80200000 <kern_entry>`，进一步确认 CPU 已到达要求的内核入口位置。
+
+![练习2：确认内核入口 PC 并结束日志记录](./images/lab1_exercise2_kernel_pc.png)
+
+4. 问题回答与结果分析
+
+（1）RISC-V 硬件加电后最初执行的几条指令位于什么地址？
+
+在本实验所使用的 QEMU 4.1.1 `virt` 模拟平台中，CPU 复位后的初始 PC 为 `0x1000`。最初五条指令分别位于 `0x1000`、`0x1004`、`0x1008`、`0x100c` 和 `0x1010`。该地址是本实验平台的配置，不能据此认为所有 RISC-V 硬件的复位地址都相同。
+
+（2）这些指令主要完成了哪些功能？
+
+| 指令地址 | 指令 | 主要功能及实际观察 |
+|----------|------|--------------------|
+| `0x1000` | `auipc t0,0x0` | 保存复位代码的基地址，执行后 `t0 = 0x1000` |
+| `0x1004` | `addi a1,t0,32` | 准备设备树地址参数，执行后 `a1 = 0x1020` |
+| `0x1008` | `csrr a0,mhartid` | 读取硬件线程编号，执行后 `a0 = 0` |
+| `0x100c` | `ld t0,24(t0)` | 从 `0x1018` 读取固件入口地址，执行后 `t0 = 0x80000000` |
+| `0x1010` | `jr t0` | 跳转到固件入口，执行后 `pc = 0x80000000` |
+
+因此，最初几条指令的主要作用是准备固件启动所需的参数，并将控制权交给 OpenSBI。后续由 OpenSBI 完成初始化并转入内核。本次实际观察到的启动路径为：
+
+```text
+0x1000：复位启动代码
+    ↓ 准备参数，读取入口并跳转
+0x80000000：OpenSBI 固件入口
+    ↓ 固件初始化并移交控制权
+0x80200000：内核入口 kern_entry
+```
+
+本次 Makefile 通过 QEMU 的 `-device loader,file=bin/ucore.img,addr=0x80200000` 参数装入内核镜像，应区分镜像加载和 CPU 跳转执行两个过程。入口断点验证的是 CPU 实际到达内核，不应将命中断点描述为刚刚发生了内核镜像加载，也不能根据此次跟踪宣称已经验证了内核全部初始化和输出操作。
+
+5. 调试中的问题与 AI 协作记录
+
+最初连接 GDB 时曾出现数据包错误和 `vMustReplyEmpty: timeout`，此时不能认定远程连接成功。调试期间还曾尝试在浏览器中打开 `localhost:1234`，但该端口提供的是 GDB 远程协议服务，不是 HTTP 网页。关闭浏览器访问、退出原有 GDB 和 QEMU 会话，再依次运行 `make debug`、`make gdb` 后，连接成功并停在 `0x1000`。由于没有对连接异常进行完整的协议抓包，不能把浏览器访问断定为唯一故障原因。
+
+本次采用 AI 分步指导、成员在 WSL 终端实际操作的方式：AI 解释每条命令的目的和预期结果，成员执行后保存截图，AI 再读取实际 GDB 日志核对寄存器和跳转地址。提示词按标准四段式整理在 [prompt.md 的练习2部分](./prompt.md#练习2使用-gdb-验证启动流程成员2)，其中的回答摘要与验证结果以本次对话、截图和日志为依据。
+
+本练习完成了复位地址确认、最初五条指令单步分析、OpenSBI 入口跳转验证和内核入口断点验证，无需修改内核代码。
+
+---
+
+
 ### Challenge：[Challenge标题]
 
 **负责人：** [学号-姓名]
@@ -342,6 +589,14 @@ qemu-system-riscv64 -machine virt -nographic -bios default -kernel bin/kernel
 ![内核启动成功截图](./images/lab1_kernel_success.png)
 
 
+
+---
+
+**4. 练习2：启动流程的 GDB 验证**
+
+本次在 QEMU 4.1.1 环境中使用原始 `make debug` 和 `make gdb` 完成验证。通过单步操作确认初始 PC 为 `0x1000`，读取固件入口地址后跳转到 `0x80000000`，继续执行命中 `0x80200000` 的 `kern_entry` 断点。
+
+六张调试截图、对应命令和结果分析见“练习2：使用 GDB 验证启动流程”；完整输出见 [GDB 调试日志](./lab1-exercise2-gdb.log)。这组证据验证了 CPU 到达内核入口，不将尚未执行的内核初始化过程记为本次验证结果。
 
 ---
 
