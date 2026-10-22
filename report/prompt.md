@@ -103,3 +103,88 @@ monitor info mem
 实际查询显示，低虚拟地址 `0x80000000` 和高虚拟地址 `0xFFFFFFFFC0000000` 均映射到物理地址 `0x80000000`，符合启动页表设计。
 
 因此，成员一负责的物理内存初始化功能已经通过基础运行测试。后续仍可进一步检查额外保留内存区域及复杂边界情况。
+
+---
+
+## 成员二：徐熙凯（2413467）
+
+以下根据实际开发需求与处理过程，整理提示词和 AI 回答摘要。
+
+### 第一组：理解 First-Fit 连续物理内存分配算法
+
+**用户提示词：**
+
+我负责 Lab2 的 First-Fit 分析和 Best-Fit 实现，队友已经完成 `page_init()`。请结合 `kern/mm/default_pmm.c`，解释 `default_init()`、`default_init_memmap()`、`default_alloc_pages()` 和 `default_free_pages()` 的作用。说明空闲块如何组织、分配时如何拆分、释放时如何合并，并分析 First-Fit 是否有改进空间。
+
+**AI 回答：**
+
+First-Fit 使用按地址顺序排列的双向链表管理空闲物理内存块。每个空闲块由首页的 `Page` 描述符代表，`property` 表示块内页数，`nr_free` 表示全部空闲页数。
+
+1. `default_init()` 初始化链表头，并将空闲页计数清零。
+2. `default_init_memmap()` 接收 `page_init()` 注册的可用页，清除保留状态，将空闲块加入链表。
+3. `default_alloc_pages()` 从链表头开始，选择第一个足够大的空闲块；如果块大于申请大小，分配前面的页面，将剩余部分放回链表。
+4. `default_free_pages()` 将释放区间按地址顺序插回链表，检查并合并与它相邻的前后空闲块，同时恢复空闲页计数。
+
+例如，按地址顺序有 10、4、8 页三个空闲块，申请 3 页时，First-Fit 会选择首先遇到的 10 页块。
+
+该实现最坏需要遍历整个空闲链表。可以使用索引、平衡树或其他组织方式改进查找效率；及时合并相邻空闲块可以缓解外部碎片，但不能将被已分配页面隔开的空闲块直接合并。
+
+---
+
+### 第二组：实现 Best-Fit 物理内存管理模块
+
+**用户提示词：**
+
+请根据 `pmm.h` 的 `struct pmm_manager` 接口，参考 `default_pmm.c`，补全 `best_fit_pmm.c` 的 Best-Fit 实现。要求每次选择所有足够大的空闲块中最小的一块，同样大小时选择地址较低的块；正确完成初始化、块拆分、释放、相邻空闲块合并和空闲页统计。没有足够大的连续块时返回 `NULL`，不能改变原有空闲状态。保留 `basic_check()`、`best_fit_check()` 和队友的 `page_init()`，将 `YOUR CODE` 替换为我的学号 2413467，并说明如何接入内核。
+
+**AI 回答：**
+
+可以保留按地址排列的空闲链表，方便释放时判断相邻关系；分配时遍历整个链表，使用 `best` 记录最小的可用候选块，遇到完全匹配的块时提前停止。
+
+主要实现如下：
+
+1. `best_fit_init()`：初始化空闲链表和计数。
+2. `best_fit_init_memmap()`：接收可用页，初始化页状态并建立空闲块。
+3. `best_fit_alloc_pages()`：选择最小可用块，分配申请的页数，需要时拆出剩余块。
+4. `best_fit_free_pages()`：清理释放区间的状态，恢复空闲页计数，并合并相邻空闲块。
+5. `best_fit_nr_free_pages()`：返回空闲页数。
+6. `best_fit_insert_block()`：复用按地址插入和前后合并的逻辑。
+7. `best_fit_pmm_manager`：注册上述接口，检查接口指向原有 `best_fit_check()`。
+
+`best_fit_pmm.h` 已经声明管理器，无需重复修改。最后在 `pmm.c` 的 `init_pmm_manager()` 中设置：
+
+```c
+pmm_manager = &best_fit_pmm_manager;
+```
+
+这样任务一仍通过统一接口注册空闲页，后续分配和回收会调用 Best-Fit。Best-Fit 的线性查找仍有优化空间，也可能留下较小的外部碎片，不能保证在所有负载下优于 First-Fit。
+
+---
+
+### 第三组：分析框架编译错误与模块接入
+
+**用户提示词：**
+
+当前 `best_fit_pmm.c` 只提供测试函数，编译时提示 `free_list` 和 `nr_free` 没有定义。请解释原因，并说明应该补充哪些内容。完成后如何确认内核真正运行的是 Best-Fit，而不是原来的 First-Fit？不要通过修改给定测试来绕过问题。
+
+**AI 回答：**
+
+这两个名字是测试函数需要使用的分配器内部状态。现有 Best-Fit 框架尚未实现管理器，因此没有提供对应定义。`default_pmm.c` 的 `free_area` 是该文件私有的静态变量，不能直接作为 Best-Fit 的内部状态使用。
+
+需要在 Best-Fit 文件中定义自己的空闲区结构，并提供与测试约定一致的名字：
+
+```c
+static free_area_t free_area;
+#define free_list (free_area.free_list)
+#define nr_free (free_area.nr_free)
+```
+
+这些定义必须与完整的初始化、分配、回收和管理器注册一起实现。完成后切换 `init_pmm_manager()` 中的管理器指针，并查看运行输出是否为：
+
+```text
+memory management: best_fit_pmm_manager
+```
+
+仅看到编译成功，或仅看到分配检查成功，不能单独证明内核运行的是 Best-Fit，还要确认实际选择的管理器。
+
+---
