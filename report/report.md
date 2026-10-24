@@ -5,8 +5,8 @@
 | 项目 | 内容 |
 |---|---|
 | **实验名称** | Lab2：物理内存管理 |
-| **小组成员** | 钟沁涵（2413195）、徐熙凯（2413467）、待补充 |
-| **完成日期** | 待填写 |
+| **小组成员** | 钟沁涵（2413195）、徐熙凯（2413467）、蔡芷涵（2413533） |
+| **完成日期** | 2026-10-24 |
 
 ### 小组分工
 
@@ -14,7 +14,7 @@
 |---|---|
 | 钟沁涵（2413195） | 物理内存初始化 `page_init()`、设备树内存探测、Sv39 启动页表修复、GDB 页表调试与地址映射验证 |
 | 徐熙凯（2413467） | First-Fit 算法分析、Best-Fit 连续物理内存分配算法的实现与测试、最终代码整合 |
-| 成员三（待补充） | Buddy System 伙伴系统分配算法的实现、测试设计及算法对比分析 |
+| 蔡芷涵（2413533） | Buddy System 伙伴系统分配算法的实现、测试设计及算法对比分析 |
 
 **实验报告分工：**
 
@@ -96,9 +96,24 @@
 成员二保留指导书对应的本机工具环境，在队友的 `lab2` 分支基础上完成
 First-Fit 分析及 Best-Fit 实现。原 Lab1 目录另行保留。
 
-#### 成员三
+#### 成员三：蔡芷涵（2413533）
 
-由成员三补充本人实际使用的宿主系统、Linux 环境、编辑器、编译工具、模拟器及调试工具等信息。
+| 项目 | 实验环境 |
+|---|---|
+| 宿主操作系统 | Windows |
+| Linux 实验环境 | WSL2，Ubuntu 24.04.5 LTS（Noble Numbat） |
+| 代码编辑器 | Visual Studio Code（Remote WSL） |
+| 实验项目 | riscv64-ucore |
+| 目标指令集架构 | RISC-V 64 位 |
+| 交叉编译工具链 | riscv64-unknown-elf-gcc 13.2.0 |
+| 模拟运行环境 | QEMU 8.2.2（Debian 1:8.2.2+ds-0ubuntu1.18） |
+| 启动固件 | OpenSBI v1.3 |
+| 调试工具 | 本任务未使用 GDB |
+| 版本管理工具 | Git 2.43.0 |
+| Git 实验分支 | `lab2`|
+| 代码存放路径 | `/home/czh18/OS48Team/code`|
+
+成员三使用 Windows 宿主机和 WSL2 Ubuntu 环境，通过 Visual Studio Code Remote WSL 开发和编译内核，使用 RISC-V 交叉编译工具链生成内核镜像，并通过 QEMU 启动 RISC-V ucore 内核，完成 Buddy System 的编译和运行验证。
 
 ### 2.2 AI 辅助开发环境
 
@@ -106,7 +121,7 @@ First-Fit 分析及 Best-Fit 实现。原 Lab1 目录另行保留。
 |---|---|---|---|
 | 钟沁涵（2413195） | ChatGPT | GPT-6 | 实验原理理解、代码实现辅助、GDB 调试与错误定位 |
 | 徐熙凯（2413467） | Codex 桌面端 | GPT-6 | First-Fit 分析、Best-Fit 实现与测试、报告整理 |
-| 成员三（待补充） | 待补充 | 待补充 | 由成员三填写 |
+| 蔡芷涵（2413533） | ChatGPT | GPT-6 |Buddy System 方案分析、代码实现辅助、差异审查及测试记录整理 |
 
 **成员一的 AI 使用说明：**
 
@@ -119,6 +134,13 @@ AI 主要起到原理解释、代码分析和调试辅助作用，最终实现�
 **成员二的 AI 使用说明：**
 
 通过 Codex 辅助理解 First-Fit 的空闲链表与页状态，按给定接口实现 Best-Fit，并分析原始框架的编译错误和管理器接入方式。实现后使用课程测试、附加边界测试和实际终端截图核对结果，整理提示词、规格及问题分析。
+
+**成员三的 AI 使用说明：**
+
+实验过程中，使用 VS Code Copilot Chat 辅助分析 `pmm_manager` 接口、`struct Page` 以及 Buddy System 的实现方案。根据实验要求，分别设计了用于生成 Buddy System 分配模块的 Prompt，以及用于生成测试函数的 Prompt。
+
+代码生成后，结合代码差异、`make` 编译结果和 QEMU 启动输出进行检查。对于 AI 提出的实现方案，依据实际代码和运行结果进行确认，没有直接将未验证的分析作为实验结论。
+
 
 ---
 
@@ -709,6 +731,116 @@ static void init_pmm_manager(void) {
 
 补全 Best-Fit 并接入后，首次运行课程评分测试即通过。本节记录的实际编译问题是初始框架缺少分配器内部状态；连续区间不足、相邻合并和管理器选择则通过针对性的检查验证。
 
+#### 4.8 任务三：Buddy System 伙伴系统实现
+
+**负责人：蔡芷涵（2413533）**
+
+Buddy System 将可用物理页按照大小为 2 的幂次组织成不同阶数的空闲块。order 为 k 的块包含 `2^k` 个物理页。本实现中 `MAX_ORDER` 设置为 15。实验环境中的物理内存为 128 MiB，每页大小为 4 KiB，物理页总数为：
+
+```text
+128 MiB / 4 KiB = 32768 = 2^15 页
+```
+
+实现中使用 `free_area[order]` 保存各阶的空闲块链表。空闲块头的 `Page.property` 保存块的 order，`PG_property` 表示该页是空闲块头，`page_link` 用于将块头加入对应链表。Buddy 实现还使用私有的 `PG_buddy_allocated` 标志记录已分配块头。
+
+初始化时，`buddy_init_memmap()` 根据物理页号的对齐条件和剩余页数，将连续可用物理页分解为多个满足对齐要求的二次幂块。因此，初始可用内存长度不是 2 的幂时，也可以由不同 order 的空闲块共同表示。
+
+分配时，`buddy_alloc_pages(n)` 将请求页数向上取整到能够容纳它的最小二次幂。例如申请 3 页时，实际分配一个 order 为 2、大小为 4 页的块。如果对应 order 没有空闲块，就从更高 order 获取一个块并逐级拆分；每次拆分时，将右半块加入对应阶的空闲链表，左半块继续用于分配。
+
+释放时，`buddy_free_pages()` 要求释放完整的 Buddy 块。程序根据物理页号计算伙伴：
+
+```text
+buddy_pfn = pfn ^ (1 << order)
+```
+
+如果伙伴处于相同 order 且为空闲状态，就将伙伴从空闲链表中移除，与当前块合并为更高 order 的块，然后继续检查更高阶伙伴。
+
+由于 Buddy 分配会向上取整，申请 3 页后实际占用 4 页，因此必须按实际块大小释放：
+
+```c
+page = alloc_pages(3);
+free_pages(page, 4);
+```
+
+本实现不支持任意子区间释放，例如：
+
+```c
+free_pages(page + 1, 2);
+```
+
+Buddy System 通过 `pmm_manager` 接口接入内核，具体实现文件为 `code/kern/mm/buddy_pmm.c` 和 `code/kern/mm/buddy_pmm.h`。
+
+`buddy_check()` 通过 `pmm_manager.check` 在内核启动时执行，用于验证Buddy System 的初始化、分配、拆分、释放、伙伴合并、内存不足处理和空闲页统计。
+
+完成 Buddy 验证后，`pmm.c` 已恢复默认使用 `best_fit_pmm_manager`，以保持团队最终默认验收路径为 Best-Fit。
+
+#### 4.9 任务三：Buddy System 测试设计
+
+根据实验要求，Buddy System 的测试分为基本功能测试和边界情况测试两部分。测试函数命名为 `buddy_check()`，位于 `code/kern/mm/buddy_pmm.c` 中，并通过 `pmm_manager` 的 `.check` 接口接入内核。内核启动后，物理内存管理器会调用该函数完成自动检查。
+
+测试覆盖的主要内容如下：
+
+| 测试内容 | 验证目标 |
+|---|---|
+| 单页分配和释放 | 验证 order 为 0 的基本分配和回收 |
+| 非 2 的幂次请求 | 验证申请 3 页时是否向上取整为 4 页 |
+| 高阶块拆分 | 验证没有低阶空闲块时能否从高阶块逐级拆分 |
+| 伙伴块合并 | 验证释放后相同阶数的伙伴块能否合并 |
+| 空闲页统计 | 验证分配和释放前后空闲页数量是否正确 |
+| 内存不足 | 验证空间不足时是否返回 `NULL`，并且空闲页数量不被错误修改 |
+| 空闲块状态 | 验证 `Page.property`、`PG_property` 和空闲链表状态是否一致 |
+| 地址对齐 | 验证不同 order 的空闲块是否满足对应的地址对齐要求 |
+
+对于非 2 的幂次请求，Buddy System 会将请求向上取整。例如：
+
+```c
+page = alloc_pages(3);
+free_pages(page, 4);
+```
+
+申请 3 页时实际得到的是一个包含 4 页的 order-2 块，因此释放时必须按照实际块大小释放，不能释放任意子区间。
+
+本次测试没有单独建立外部的 `buddy_test.c` 文件，而是将测试函数集成在 `buddy_pmm.c` 的 `buddy_check()` 中，并通过 `pmm_manager.check` 接口调用。这样可以在内核启动过程中直接验证 Buddy System 的分配器状态和运行结果。
+
+#### 4.10 任务三：实现过程中遇到的问题及解决方法
+
+实现过程中发现，Buddy 块在拆分、分配和合并时需要同时维护空闲链表、块大小以及页面标志。如果只更新空闲链表而没有清理旧块头的状态标志，可能导致已经合并的块仍然保留错误的已分配状态。
+
+具体问题是：较低地址的块与较高地址的伙伴块合并时，较高地址块头上的 `PG_buddy_allocated` 标志可能残留。这样会导致后续检查误认为该区域仍然处于已分配状态。
+
+解决方法是在块合并前清理被合并伙伴块的状态标志：
+
+```c
+ClearPageBuddyAllocated(base);
+```
+
+然后重新设置合并后块头的 `Page.property`，并将新的块头加入更高阶的空闲链表。
+
+修复后重新执行：
+
+```bash
+make
+```
+
+并使用 QEMU 启动内核。运行结果中出现：
+
+```text
+memory management: buddy_pmm_manager
+check_alloc_page() succeeded!
+```
+
+同时没有出现 `panic` 或 `assert failed`，说明该问题已经得到修复。
+
+需要注意的是，Buddy System 与 First-Fit、Best-Fit 的释放约定不同。Buddy 分配器会将请求向上取整为二次幂大小，因此释放时必须传入实际分配的块大小。如果申请 3 页后使用 `free_pages(page, 3)` 释放，就可能破坏 Buddy 块的完整性。因此本实现要求申请和释放使用对应的完整 Buddy 块。
+
+#### 4.11 First-Fit、Best-Fit 与 Buddy System 对比
+
+First-Fit 按空闲链表顺序选择第一个满足请求的空闲块，查找简单，但可能较快消耗链表前部的大块空间。Best-Fit 会遍历所有候选块，选择能够满足请求的最小空闲块，可能减少当前分配产生的剩余空间，但查找成本更高，也可能产生较多难以利用的小碎片。
+
+Buddy System 将空闲内存按 `2^order` 大小管理，分配时通过拆分高阶块得到合适大小的块，释放时通过伙伴地址计算和合并快速恢复大块。它的优点是拆分和合并规则清晰、伙伴查找效率较高；缺点是申请大小必须向上取整，可能产生内部碎片。
+
+因此，First-Fit 和 Best-Fit 主要管理任意大小的连续空闲区间，Buddy System 则通过固定的二次幂块组织内存。三种算法在查找效率、碎片类型和实现复杂度方面各有取舍。
+
 ---
 
 ## 五、测试与验证
@@ -942,6 +1074,47 @@ Total Score: 20/20
 
 **验证范围：** Best-Fit 及已有任务一集成已通过上述检查；成员三的 Buddy System 和成员一完整的 QEMU/TLB 源码调试不属于本节的已完成项。任务一限制物理内存不超过 128 MiB，本次未修改此限制。
 
+### 5.7 成员三：Buddy System 编译与运行验证
+
+为了单独验证 Buddy System，曾临时将 `pmm.c` 中的默认管理器切换为
+`buddy_pmm_manager`。执行：
+
+```bash
+cd /home/czh18/OS48Team/code
+make
+```
+![Buddy 编译验证](./images/buddy_compile.png)
+
+编译成功，退出码为 0。随后执行：
+
+```bash
+cd /home/czh18/OS48Team/code
+timeout 20s qemu-system-riscv64 \
+    -machine virt -nographic -bios default -kernel bin/ucore.img
+```
+
+QEMU 输出中的关键内容为：
+
+```text
+memory management: buddy_pmm_manager
+Physical memory base: 0x0000000080000000
+Physical memory size: 128 MB
+Total managed pages: 32768
+Free pages: 31929
+check_alloc_page() succeeded!
+```
+![Buddy QEMU 运行验证](./images/buddy_run.png)
+
+运行过程中未出现 `panic` 或 `assert failed`。QEMU 最后由 `timeout 20s`
+主动终止，退出码为 124，表示命令按预设时限结束，不代表内核运行失败。
+
+本次验证说明 Buddy System 已成功编译、接入内核并完成启动自检。完成验证后，
+`pmm.c` 已恢复默认使用 `best_fit_pmm_manager`，因此团队最终默认验收仍使用
+Best-Fit。
+
+Buddy 验证没有运行 Best-Fit 专用外部评分测试；Best-Fit 的课程测试结果
+由成员二单独记录。
+
 ---
 
 ## 六、实验总结与收获
@@ -980,3 +1153,45 @@ Total Score: 20/20
 AI 辅助完成代码及报告后，使用课程测试和独立位图测试验证结果，并对比
 Git 基线确认给定测试、队友的初始化函数没有被改写。成员二当前完成的是
 First-Fit 分析和 Best-Fit 模块；最终三人代码整合仍需等待 Buddy System。
+
+---
+
+### 成员三的实验总结与 AI 协作记录
+
+本次任务实现了 Buddy System 伙伴系统分配算法，并将其接入 ucore
+现有的 `pmm_manager` 接口。通过为不同 order 建立空闲链表，Buddy
+System 能够按照 `2^order` 页管理连续物理内存块。
+
+在实现过程中，重点理解了以下内容：
+
+1. 初始化时如何根据物理页号的对齐条件，将连续可用物理页分解为多个
+   不同 order 的空闲块。
+2. 分配时如何将请求页数向上取整，并在高阶空闲块中逐级拆分。
+3. 释放时如何使用异或运算计算伙伴地址，并在伙伴空闲且 order 相同的
+   条件下逐级合并。
+4. 如何维护 `Page.property`、`PG_property`、空闲链表和空闲页总数。
+5. 为什么 Buddy System 申请非 2 的幂次页数后，必须按照实际分配的完整
+   Buddy 块大小进行释放。
+
+测试方面，通过 `buddy_check()` 验证了单页分配与释放、非 2 的幂次请求、
+高阶块拆分、伙伴块合并、内存不足、空闲页统计以及页面状态标志等行为。
+随后通过 `make` 和 QEMU 启动验证，确认内核能够使用
+`buddy_pmm_manager` 正常启动，并输出：
+
+```text
+memory management: buddy_pmm_manager
+check_alloc_page() succeeded!
+```
+
+实现过程中发现，Buddy 块合并后如果不清理旧块头的状态标志，可能导致
+后续检查错误判断页面是否仍处于已分配状态。通过清理被合并块的相关标志，
+并重新设置合并后块头的 order，解决了该问题。
+
+与 First-Fit 和 Best-Fit 相比，Buddy System 的优点是块拆分和伙伴合并
+规则明确，伙伴地址可以通过位运算快速计算；缺点是分配大小必须向上取整，
+可能产生内部碎片，并且释放时必须使用完整的 Buddy 块。
+
+本次实验只实现并验证了 Buddy System 任务三，未实现实验要求中的 SLUB
+扩展 Challenge。完成 Buddy 验证后，`pmm.c` 已恢复默认使用
+`best_fit_pmm_manager`，因此最终团队代码仍以 Best-Fit 作为默认物理内存
+管理器。
