@@ -6,6 +6,137 @@
 
 //lab2 请补充你在lab2中的代码
 
+static free_area_t free_area;
+
+#define free_list (free_area.free_list)
+#define nr_free (free_area.nr_free)
+
+static void best_fit_check(void);
+
+static void
+best_fit_init(void) {
+    list_init(&free_list);
+    nr_free = 0;
+}
+
+// Keep blocks in address order so only the two neighbours can be adjacent.
+// The caller accounts for the number of newly freed pages.
+static void
+best_fit_insert_block(struct Page *base) {
+    list_entry_t *next = list_next(&free_list);
+    while (next != &free_list &&
+           le2page(next, page_link) < base) {
+        next = list_next(next);
+    }
+    list_add_before(next, &base->page_link);
+
+    list_entry_t *prev = list_prev(&base->page_link);
+    if (prev != &free_list) {
+        struct Page *p = le2page(prev, page_link);
+        if (p + p->property == base) {
+            p->property += base->property;
+            ClearPageProperty(base);
+            base->property = 0;
+            list_del(&base->page_link);
+            base = p;
+        }
+    }
+
+    next = list_next(&base->page_link);
+    if (next != &free_list) {
+        struct Page *p = le2page(next, page_link);
+        if (base + base->property == p) {
+            base->property += p->property;
+            ClearPageProperty(p);
+            p->property = 0;
+            list_del(&p->page_link);
+        }
+    }
+}
+
+static void
+best_fit_init_memmap(struct Page *base, size_t n) {
+    assert(n > 0);
+    for (struct Page *p = base; p != base + n; p++) {
+        assert(PageReserved(p));
+        p->flags = 0;
+        p->property = 0;
+        set_page_ref(p, 0);
+    }
+    base->property = n;
+    SetPageProperty(base);
+    nr_free += n;
+    best_fit_insert_block(base);
+}
+
+static struct Page *
+best_fit_alloc_pages(size_t n) {
+    assert(n > 0);
+    if (n > nr_free) {
+        return NULL;
+    }
+
+    struct Page *best = NULL;
+    list_entry_t *le = &free_list;
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *p = le2page(le, page_link);
+        if (p->property >= n &&
+            (best == NULL || p->property < best->property)) {
+            best = p;
+            if (p->property == n) {
+                break;
+            }
+        }
+    }
+    if (best == NULL) {
+        return NULL;
+    }
+
+    size_t block_size = best->property;
+    list_entry_t *prev = list_prev(&best->page_link);
+    list_del(&best->page_link);
+    if (block_size > n) {
+        struct Page *rest = best + n;
+        rest->property = block_size - n;
+        SetPageProperty(rest);
+        list_add(prev, &rest->page_link);
+    }
+    nr_free -= n;
+    ClearPageProperty(best);
+    best->property = 0;
+    return best;
+}
+
+static void
+best_fit_free_pages(struct Page *base, size_t n) {
+    assert(n > 0);
+    for (struct Page *p = base; p != base + n; p++) {
+        assert(!PageReserved(p) && !PageProperty(p));
+        p->flags = 0;
+        p->property = 0;
+        set_page_ref(p, 0);
+    }
+    base->property = n;
+    SetPageProperty(base);
+    nr_free += n;
+    best_fit_insert_block(base);
+}
+
+static size_t
+best_fit_nr_free_pages(void) {
+    return nr_free;
+}
+
+const struct pmm_manager best_fit_pmm_manager = {
+    .name = "best_fit_pmm_manager",
+    .init = best_fit_init,
+    .init_memmap = best_fit_init_memmap,
+    .alloc_pages = best_fit_alloc_pages,
+    .free_pages = best_fit_free_pages,
+    .nr_free_pages = best_fit_nr_free_pages,
+    .check = best_fit_check,
+};
+
 static void
 basic_check(void) {
     struct Page *p0, *p1, *p2;
