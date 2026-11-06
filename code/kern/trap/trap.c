@@ -6,6 +6,7 @@
 #include <memlayout.h>
 #include <mmu.h>
 #include <riscv.h>
+#include <sbi.h>
 #include <stdio.h>
 #include <trap.h>
 
@@ -81,8 +82,55 @@ void print_regs(struct pushregs *gpr) {
 }
 
 //lab3 function2 YOUR CODE
+#define SHUTDOWN_AFTER 10
+void interrupt_handler(struct trapframe *tf) {
+    // Remove the highest interrupt flag bit from scause.
+    uintptr_t irq = tf->cause & 0x7FFFFFFFFFFFFFFFUL;
 
+    switch (irq) {
+        case IRQ_S_TIMER:
+            // Schedule the next timer interrupt.
+            clock_set_next_event();
 
+            // Update the global timer tick counter.
+            ticks++;
+
+            // Print once every TICK_NUM timer interrupts.
+            if (ticks % TICK_NUM == 0) {
+                print_ticks();
+
+                if (ticks / TICK_NUM >= SHUTDOWN_AFTER) {
+                    sbi_shutdown();
+                }
+            }
+            break;
+
+        default:
+            cprintf("Unhandled interrupt: %d\n", (int)irq);
+            print_trapframe(tf);
+            break;
+    }
+}
+
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+        case CAUSE_ILLEGAL_INSTRUCTION:
+            cprintf("Illegal instruction at 0x%08x\n", tf->epc);
+            break;
+
+        case CAUSE_BREAKPOINT:
+            cprintf("Breakpoint at 0x%08x\n", tf->epc);
+            break;
+
+        default:
+            print_trapframe(tf);
+            return;
+    }
+
+    // RISC-V instructions may be 16 or 32 bits long.
+    uint16_t insn = *(const volatile uint16_t *)(uintptr_t)tf->epc;
+    tf->epc += ((insn & 0x3) == 0x3) ? 4 : 2;
+}
 static inline void trap_dispatch(struct trapframe *tf) {
     if ((intptr_t)tf->cause < 0) {
         // interrupts
