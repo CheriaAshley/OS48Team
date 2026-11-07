@@ -81,7 +81,7 @@ void print_regs(struct pushregs *gpr) {
     cprintf("  t6       0x%08x\n", gpr->t6);
 }
 
-//lab3 function2 YOUR CODE
+//lab3 function2 2413533
 #define SHUTDOWN_AFTER 10
 void interrupt_handler(struct trapframe *tf) {
     // Remove the highest interrupt flag bit from scause.
@@ -105,8 +105,12 @@ void interrupt_handler(struct trapframe *tf) {
             }
             break;
 
+        case IRQ_S_SOFT:
+            cprintf("Supervisor software interrupt\n");
+            break;
+
         default:
-            cprintf("Unhandled interrupt: %d\n", (int)irq);
+            cprintf("Unknown interrupt: cause %d\n", (int)irq);
             print_trapframe(tf);
             break;
     }
