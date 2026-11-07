@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 |------|------|
 | **实验名称** | Lab 3：中断与异常处理 |
-| **小组成员** | 2413195-钟沁涵、2413467-徐熙凯、学号3-姓名3 |
+| **小组成员** | 2413195-钟沁涵、2413467-徐熙凯、2413533-蔡芷涵 |
 | **完成日期** | 2026年11月6日 |
 
 ### 小组分工
@@ -16,7 +16,7 @@
 |------|----------------|
 | 2413195-钟沁涵 | 负责 `RESTORE_ALL` 宏的实现，分析 `SAVE_ALL` 与 TrapFrame 的数据布局，完成寄存器及相关 CSR 状态恢复；负责实验目的、实验环境、上下文恢复部分的报告编写，以及最终报告整合。 |
 | 2413467-徐熙凯 | 负责 `__alltraps` 的实现及 Trap 入口与 C 语言处理函数之间的调用关系；负责实验整体执行流程、Trap 入口与返回机制及相关报告内容。 |
-| 学号3-姓名3 | 负责 `interrupt_handler()` 和 `exception_handler()` 的实现，完成时钟中断、非法指令异常及断点异常处理；负责中断与异常处理部分的报告及测试结果整理。 |
+| 2413533-蔡芷涵 | 负责 `interrupt_handler()` 和 `exception_handler()` 的实现，完成时钟中断、非法指令异常及断点异常处理；负责中断与异常处理部分的报告及测试结果整理。 |
 
 **实验报告分工：**
 
@@ -73,13 +73,28 @@
 | 实验代码目录 | `/mnt/e/os_team/lab3/code` |
 | 本轮验证日期 | 2026-11-07 |
 
+### 成员 C 的实验环境
+
+| 项目 | 配置 |
+|---|---|
+| 宿主操作系统 | Windows |
+| Linux 实验环境 | WSL2 Ubuntu 24.04 |
+| 代码编辑工具 | Visual Studio Code（Remote WSL） |
+| 目标架构 | RISC-V 64 |
+| 交叉编译工具链 | RISC-V 64 交叉编译工具链 |
+| 构建工具 | GNU Make |
+| 版本管理 | Git、GitHub |
+| 实验仓库 | `OS48Team` |
+| 实验分支 | `lab3` |
+| 实验代码目录 | `~/OS48Team-lab3/code` |
+
 ### AI 工具使用情况
 
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|-------------|----------|------|
 | 2413195-钟沁涵 | ChatGPT | GPT-6 | 辅助分析 TrapFrame 布局、实现 `RESTORE_ALL`、排查汇编错误及整理实验报告 |
 | 2413467-徐熙凯 | Codex 桌面端 | GPT-6 | Trap 入口调用实现、接口约束分析、编译和评分验证、报告整理 |
-| 学号3-姓名3 | 待填写 | 待填写 | 根据实际使用情况补充 |
+| 2413533-蔡芷涵 | ChatGPT | GPT-6 | 辅助分析 TrapFrame 与中断、异常处理逻辑，完善`interrupt_handler()` 和 `exception_handler()`，排查代码编译及测试问题，并协助整理实验报告 |
 
 本实验采用老师提供的 Lab3 代码框架，在独立的 `lab3` Git 分支中完成开发。根据实验分工，分别实现 Trap 上下文恢复、Trap 入口调用及中断与异常处理功能，通过 Git 管理代码修改和小组协作过程。
 
@@ -182,7 +197,7 @@ sret                   完成 Trap 返回
 
 ### 功能模块一：Trap 上下文恢复
 
-**负责人：** 2413195
+**负责人：** 2413195-钟沁涵
 
 #### 模块功能描述
 
@@ -424,7 +439,7 @@ make obj/kern/trap/trapentry.o
 
 ### 功能模块二：Trap 入口与返回调用
 
-**负责人：** 2413467-徐熙凯（成员 B）
+**负责人：** 2413467-徐熙凯
 
 #### 模块功能描述
 
@@ -520,11 +535,278 @@ __trapret:
 
 ### 功能模块三：中断与异常处理
 
-**负责人：** 成员三（待补充学号及姓名）
+**负责人：** 2413533-蔡芷涵
 
-本模块由成员三负责，内容包括 `interrupt_handler()`、`exception_handler()` 的实现，以及时钟中断、非法指令异常和断点异常的处理与验证。
+#### 模块功能描述
 
-待成员三完成后，按照相同模板补充模块功能描述、Spec、Prompt、实现迭代过程和测试结果。
+**需要实现的函数：**
+
+```c
+void interrupt_handler(struct trapframe *tf);
+void exception_handler(struct trapframe *tf);
+```
+
+**代码位置与相关接口：**
+
+- `kern/trap/trap.c`：本模块的实际修改文件，实现两个处理函数。
+- `kern/trap/trap.h`：提供 `struct trapframe`，保存 Trap 的原因、异常程序计数器等信息。
+- `kern/driver/clock.h`：提供时钟计数器 `ticks` 和 `clock_set_next_event()`。
+- `libs/riscv.h`：提供中断、异常原因编号及相关常量。
+- `libs/sbi.h`：提供 `sbi_shutdown()` 关机接口。
+
+**功能说明：**
+
+发生 Trap 后，已有的 `trap()` 调用 `trap_dispatch()`，根据 `tf->cause` 的最高位区分中断和异常，分别进入 `interrupt_handler()` 或 `exception_handler()`。
+
+本模块只负责具体事件的分类和处理，不改动汇编入口、上下文恢复宏或其他组员的实现。中断与异常处理完毕后，由已有 Trap 返回流程继续恢复处理器状态。
+
+**1. 时钟及其他中断处理。**
+
+`interrupt_handler()` 从 `tf->cause` 中提取中断原因编号。
+
+对于 S 模式定时器中断 `IRQ_S_TIMER`，首先调用 `clock_set_next_event()` 安排下一次定时器事件，然后令全局计数器 `ticks` 加一。
+
+每累计 `TICK_NUM = 100` 次时调用 `print_ticks()` 输出 `100 ticks`。当累计计数达到 `SHUTDOWN_AFTER = 10` 组（即 1000 次时钟中断）时，调用 `sbi_shutdown()` 请求系统关机。
+
+由于 SBI 设置的是下一次定时事件，不能只计数而不重新设置事件，否则无法连续接收定时器中断。
+
+此外，补充 `IRQ_S_SOFT` 分支以输出：
+
+```text
+Supervisor software interrupt
+```
+
+对其他未识别的中断，输出：
+
+```text
+Unknown interrupt: cause ...
+```
+
+并调用 `print_trapframe(tf)` 提供异常现场信息。这些输出格式与当前实验项目的测试脚本保持一致。
+
+![中断处理函数实现](./images/c_interrupt_handler.png)
+
+**2. 异常处理。**
+
+`exception_handler()` 根据 `tf->cause` 区分 `CAUSE_ILLEGAL_INSTRUCTION`（非法指令）与 `CAUSE_BREAKPOINT`（断点），分别输出异常发生的 `tf->epc` 地址。
+
+RISC-V 指令可能为 16 位压缩指令或 32 位指令；对于本实验要求处理的上述两类异常，处理结束后读取异常指令的低 16 位，当最低两位为 `11` 时将 `tf->epc` 增加 4，否则增加 2，以跳过触发异常的指令。
+
+其他尚未专门处理的异常交由 `print_trapframe(tf)` 输出现场信息，当前实现不对其自行增加 EPC。
+
+![异常处理函数实现](./images/c_exception_handler.png)
+
+**本模块的核心问题：**
+
+为什么时钟中断处理后通常不需要跳过一条指令，而非法指令或断点异常可能需要调整 EPC？
+
+因为时钟中断是异步事件，返回后应继续原来的执行位置；非法指令和断点异常与具体指令有关，如要跳过已经识别和处理的指令，就必须按实际指令长度调整返回地址，否则可能重复触发异常。
+
+#### Spec 设计
+
+本模块根据实验指导书、已有头文件及 `trap.c` 的函数接口，整理了以下实现约束：
+
+1. **修改边界：** 只完成 `kern/trap/trap.c` 中的 `interrupt_handler()` 与 `exception_handler()`，不更改 `trap()`、`trap_dispatch()` 的接口，不修改 `trapentry.S`。
+2. **Trap 原因识别：** 从 `tf->cause` 提取实际中断编号；中断与异常的分流依赖框架中已有的最高位判定。
+3. **持续时钟事件：** 对 `IRQ_S_TIMER`，每次处理中断都调用 `clock_set_next_event()`，并递增 `ticks`。
+4. **计数及结束条件：** 每 100 次输出一次统计信息，达到 10 组后请求关机；不自行定义与框架冲突的计时接口。
+5. **异常识别：** 分别处理非法指令和断点异常，输出对应的 EPC 信息；其他异常保留 TrapFrame 诊断输出。
+6. **返回地址：** 对实验要求跳过的异常指令，检查低 16 位的最低两位，分别按 2 或 4 字节调整 `tf->epc`，避免将所有指令统一视为 4 字节。
+7. **测试输出：** 针对自动测试要求，区分 S 模式软件中断与其他未知中断的输出文字。
+8. **实验标记：** 保留 `lab3 function2` 注释并填写学号 `2413533`。
+
+#### Prompt 设计（根据实际代码与协作过程整理）
+
+以下是将本次任务需求整理成 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]` 四段式后的报告用提示词。它是对需求及最终实现的归纳，不是历史对话的逐字记录。
+
+```text
+[PROMPT]
+请阅读 RISC-V 64 ucore Lab3 的已有代码，协助完善
+kern/trap/trap.c 中的 interrupt_handler(struct trapframe *tf)
+与 exception_handler(struct trapframe *tf)，分析中断/异常
+原因识别、时钟中断重设，以及异常返回地址的维护方式。
+
+[RELY]
+1. 已有的 trap()、trap_dispatch() 和 struct trapframe。
+2. kern/driver/clock.h 中的 ticks、clock_set_next_event()。
+3. libs/riscv.h 中的 IRQ_S_TIMER、IRQ_S_SOFT、
+   CAUSE_ILLEGAL_INSTRUCTION、CAUSE_BREAKPOINT。
+4. 已有的 print_ticks()、print_trapframe() 和
+   libs/sbi.h 中的 sbi_shutdown()。
+5. 老师提供的 Lab3 实验指导书及项目内的测试脚本。
+
+[GUARANTEE]
+1. 时钟中断后能够再次设置时钟事件，正确累加 ticks。
+2. 每 TICK_NUM 次输出时钟统计，达到阈值后请求关机。
+3. 识别非法指令、断点异常，输出对应的 EPC。
+4. 根据指令长度更新 EPC，避免重复执行异常指令。
+5. 对软件中断和未知中断给出符合测试要求的输出。
+6. 不更改其他成员负责的 Trap 入口与恢复代码。
+
+[SPECIFICATION]
+1. 目标平台为 RV64，TICK_NUM 为 100。
+2. 中断原因编号需从 scause 中去除最高位标志。
+3. 时钟中断使用 IRQ_S_TIMER；软件中断使用 IRQ_S_SOFT。
+4. 达到 10 组时钟统计时调用 sbi_shutdown()。
+5. 非法指令和断点异常分别使用框架提供的原因宏。
+6. 读取异常指令低 16 位：低两位为 11 时 EPC += 4，
+   否则 EPC += 2。
+7. 未专门处理的异常使用 print_trapframe() 辅助定位。
+8. 保留 lab3 function2 注释，并填入学号 2413533。
+9. 以当前源码及评分脚本为准，不假定未集成模块已通过测试。
+```
+
+#### 实现迭代过程
+
+##### 第一次迭代：时钟中断与异常分类处理
+
+阅读 `trap()`、`trap_dispatch()` 和 `struct trapframe` 后，先实现 `interrupt_handler()` 的定时器分支，完成设置下次时钟事件、累加 `ticks`、每 100 次输出以及累计 1000 次后调用 SBI 关机接口。
+
+同时，在 `exception_handler()` 中加入非法指令和断点异常分支，对其他异常保留现场输出。
+
+关键代码摘要如下（完整代码见最终提交的 `kern/trap/trap.c`）：
+
+```c
+case IRQ_S_TIMER:
+    clock_set_next_event();
+    ticks++;
+    if (ticks % TICK_NUM == 0) {
+        print_ticks();
+        if (ticks / TICK_NUM >= SHUTDOWN_AFTER) {
+            sbi_shutdown();
+        }
+    }
+    break;
+```
+
+异常处理使用 `tf->epc` 保存的地址判断指令长度，其关键处理如下：
+
+```c
+uint16_t insn = *(const volatile uint16_t *)(uintptr_t)tf->epc;
+tf->epc += ((insn & 0x3) == 0x3) ? 4 : 2;
+```
+
+**设计要点：** 时钟中断必须重新预约下一次事件；异常处理不能对 16 位、32 位指令使用同一个固定的 EPC 增量。
+
+首次实现完成后，代码以 `179ab98` 提交至 `lab3` 分支。
+
+##### 第二次迭代：修正中断诊断输出
+
+**发现的问题：**
+
+对照当前 `tools/grade.sh`，自动测试除检查异常和时钟中断行为外，还要求输出 `Supervisor software interrupt` 与 `Unknown interrupt: cause 15` 等文字。
+
+初版对所有非定时器中断均使用：
+
+```c
+Unhandled interrupt: %d
+```
+
+因此与测试的文本要求不一致。
+
+**修正方法：**
+
+在 `interrupt_handler()` 中增加 `IRQ_S_SOFT` 分支，将默认分支改为要求的 `Unknown interrupt: cause %d` 格式，并保留 `print_trapframe(tf)` 用于调试。
+
+其余定时器计数、异常处理与 EPC 调整逻辑不变。
+
+```c
+case IRQ_S_SOFT:
+    cprintf("Supervisor software interrupt\n");
+    break;
+
+default:
+    cprintf("Unknown interrupt: cause %d\n", (int)irq);
+    print_trapframe(tf);
+    break;
+```
+
+同时，将原有的 `//lab3 function2 YOUR CODE` 注释中的占位标记改为学号 `2413533`。
+
+修正版只涉及 `trap.c`，Git 提交 `b3a4765`（`Fix trap handling`）已推送到 GitHub 的 `lab3` 分支。
+
+##### 第三次迭代：编译检查与代码提交
+
+修正版覆盖本地工程文件前，已备份原文件；覆盖后通过文件比较确认修改版与工程中的 `trap.c` 内容一致。
+
+在 `code` 目录分别执行：
+
+```bash
+make obj/kern/trap/trap.o
+make bin/ucore.img
+```
+![trap.c 编译及内核构建结果](./images/c_trap_compile.png)
+
+两条命令均正常结束，说明修正版能够通过 C 文件编译以及当前工程的内核构建与镜像生成。
+
+完成编译检查后，使用 Git 提交修改，并执行：
+
+```bash
+git push origin lab3
+```
+
+最终修正版提交 `b3a4765` 已成功推送至 GitHub 的 `lab3` 分支。
+
+#### 阶段性成果
+
+本模块完成了以下工作：
+
+- [x] 完成时钟中断计数、下一次事件安排及达到阈值后的关机请求。
+- [x] 完成非法指令与断点异常识别，以及按指令长度更新 EPC。
+- [x] 完成软件中断和未知中断的输出格式修正。
+- [x] 完成 `trap.c` 单文件编译。
+- [x] 完成当前工程内核镜像构建。
+- [x] 修正版 `trap.c` 已提交并推送至 GitHub 的 `lab3` 分支。
+
+#### 对操作系统原理的理解
+
+**1. 中断与异常**
+
+中断是由外部或定时事件引起的异步事件，与当前执行的指令没有直接关系；异常则是由当前执行的指令引起的同步事件。
+
+本实验通过 `interrupt_handler()` 和 `exception_handler()` 分别处理两类事件，体现了操作系统对不同 Trap 类型采用不同处理方式的原理。
+
+**2. CPU 上下文保存与恢复**
+
+Trap 发生时，处理器需要保存当前执行位置及相关状态。本实验通过 TrapFrame 保存处理器上下文，并通过已有的汇编入口和返回流程完成保存与恢复。
+
+本模块使用 `tf->cause` 和 `tf->epc` 获取事件原因与返回地址。它与进程上下文切换的共同点是都需要保护 CPU 执行状态，但 Trap 上下文处理本身不等同于完整的进程切换。
+
+**3. 时钟中断与时间管理**
+
+时钟中断可以让操作系统周期性地获得 CPU 控制权，完成计时、统计和其他定时任务。
+
+本实验使用 `ticks` 记录时钟中断次数，并通过 `clock_set_next_event()` 设置下一次时钟事件。
+
+这种机制是操作系统实现时间管理和抢占式调度的重要基础，但本实验的时钟计数和关机逻辑并不等于完整的进程调度器。
+
+**4. 程序计数器与异常返回**
+
+`sepc` 用于保存 Trap 发生时的程序计数器信息，实验中通过 TrapFrame 的 `tf->epc` 访问该值。
+
+对于非法指令和断点异常，如果处理程序决定跳过已经处理的指令，就必须根据指令长度调整 EPC。由于 RISC-V 支持 16 位压缩指令和 32 位指令，因此需要进行实际长度判断。
+
+#### 操作系统中重要但本实验未涉及的知识点
+
+**1. 完整的进程调度机制**
+
+本实验实现了时钟中断计数，但没有完成完整的进程调度器。
+
+实际操作系统还需要维护进程状态、调度队列和时间片，根据调度算法决定下一个运行的进程，并在进程之间完成上下文切换。
+
+**2. 完整的系统调用机制**
+
+本实验涉及 Trap 入口与异常分发，但没有实现完整的用户态系统调用服务。
+
+实际操作系统需要通过 `ecall` 等机制进入内核，根据系统调用编号分发服务，并检查用户传入的参数，保证用户态与内核态之间的数据交互安全。
+
+**3. 多核处理器同步机制**
+
+本实验主要关注单个处理器执行流程中的 Trap 处理，没有完整实现多核环境下的同步与互斥。
+
+实际操作系统需要使用自旋锁、互斥锁等机制保护共享数据，避免多个 CPU 同时访问和修改共享资源时产生竞争条件。
+
+通过本模块的实现，进一步理解了 RISC-V 中断与异常的处理流程，以及时钟中断、异常返回地址和 CPU 上下文之间的关系。同时也认识到，AI 辅助生成的代码必须结合现有工程接口、实验要求和实际编译结果进行检查，不能仅凭生成结果判断实现正确性。
 
 ---
 

@@ -1,7 +1,6 @@
 # Lab3 AI 提示词记录
 
-## 成员一：2413195
-
+## 成员一：2413195-钟沁涵
 
 **提示词：**
 
@@ -189,3 +188,167 @@ csrr s3, sbadaddr 指令及 RISC-V CSR 定义。
 **AI 回答：**
 
 先运行原有 `make grade`，核对三个评分项及总分，再重新构建正常内核执行 `make qemu`，检查计数输出和关机。接入前的真实问题是入口没有调用 C 处理函数，导致初始化后没有时钟统计。最终结果以 `report/verification/lab3-b-verification.txt` 的原始输出及实验报告测试章节为准。
+
+---
+
+## 成员三：2413533-蔡芷涵
+
+以下根据成员 C 实际负责的中断与异常处理任务整理为四段式提示词，AI 回答是对本次代码实现和调试过程的总结，并非历史对话的逐字转录。
+
+**提示词一：分析中断处理函数的实现要求**
+
+**提示词：**
+
+```text
+[PROMPT]
+分析 RISC-V 64 操作系统 Lab3 中 interrupt_handler()
+的实现要求，说明时钟中断如何持续触发、计数并关机。
+
+[RELY]
+依赖 kern/trap/trap.c 中已有的 trap()、trap_dispatch()，
+kern/driver/clock.h 中的 ticks、clock_set_next_event()，
+以及 IRQ_S_TIMER、TICK_NUM、sbi_shutdown() 等接口。
+
+[GUARANTEE]
+正确识别 S 模式时钟中断。
+每次中断安排下一次时钟事件，并将 ticks 加一。
+每累计 100 次输出统计，累计 1000 次后请求关机。
+
+[SPECIFICATION]
+目标架构为 RV64。
+通过 tf->cause 获取中断原因，去除最高位中断标志。
+TICK_NUM 为 100，SHUTDOWN_AFTER 为 10。
+只修改成员 C 负责的中断处理逻辑，
+不改变其他组员负责的 Trap 入口与上下文恢复代码。
+```
+
+**AI 回答：**
+
+`interrupt_handler()` 首先从 `tf->cause` 中提取中断原因编号。当中断类型为 `IRQ_S_TIMER` 时，调用 `clock_set_next_event()` 设置下一次时钟事件，并执行 `ticks++`。当 `ticks` 为 `TICK_NUM` 的整数倍时，调用 `print_ticks()` 输出统计信息；累计达到 1000 次后通过 `sbi_shutdown()` 请求系统关机。设置下一次时钟事件是实现持续定时器中断的关键，否则系统可能只能响应一次时钟中断。
+
+**提示词二：设计非法指令与断点异常处理**
+
+**提示词：**
+
+```text
+[PROMPT]
+分析 Lab3 中 exception_handler(struct trapframe *tf)
+的实现方法，说明非法指令和断点异常如何识别，
+以及处理后怎样调整异常返回地址。
+
+[RELY]
+依赖 struct trapframe、tf->cause、tf->epc，
+CAUSE_ILLEGAL_INSTRUCTION、CAUSE_BREAKPOINT，
+以及已有的 print_trapframe()。
+
+[GUARANTEE]
+正确区分非法指令异常与断点异常。
+输出异常发生时的 EPC 地址。
+根据实际指令长度更新 EPC，
+避免返回后重复执行触发异常的指令。
+
+[SPECIFICATION]
+RISC-V 指令可能为 16 位或 32 位。
+读取异常指令低 16 位，
+最低两位为 11 时 EPC 增加 4，否则增加 2。
+其他未专门处理的异常使用 print_trapframe() 输出现场。
+不修改 trap()、trap_dispatch() 或 TrapFrame 数据结构。
+```
+
+**AI 回答：**
+
+`exception_handler()` 根据 `tf->cause` 判断异常类型。对于 `CAUSE_ILLEGAL_INSTRUCTION` 和 `CAUSE_BREAKPOINT`，分别输出对应的异常名称和 `tf->epc` 地址。由于 RISC-V 同时支持 16 位压缩指令和 32 位指令，不能直接将所有异常的返回地址统一增加 4。可以读取异常位置的低 16 位，通过最低两位判断指令长度，再对 `tf->epc` 增加 2 或 4。未专门处理的异常调用 `print_trapframe(tf)` 输出现场信息。
+
+**提示词三：修正中断诊断输出与测试要求不一致的问题**
+
+**提示词：**
+
+```text
+[PROMPT]
+检查当前 interrupt_handler() 的输出格式，
+分析与 Lab3 自动测试脚本之间存在的不一致，
+并提出仅修改成员 C 代码的修复方法。
+
+[RELY]
+依赖现有 interrupt_handler()、IRQ_S_SOFT、
+print_trapframe() 和 tools/grade.sh 中的输出检查条件。
+
+[GUARANTEE]
+正确输出 S 模式软件中断的信息。
+对未知中断输出原因编号及 TrapFrame 信息。
+保持原有时钟中断和异常处理逻辑不变。
+
+[SPECIFICATION]
+软件中断输出 Supervisor software interrupt。
+未知中断输出 Unknown interrupt: cause %d。
+使用已有的 cprintf() 和 print_trapframe()。
+不修改老师提供的测试脚本，
+不修改其他组员负责的代码。
+```
+
+**AI 回答：**
+
+检查发现，初版程序将非定时器中断统一输出为 `Unhandled interrupt`，与现有测试脚本要求的文本不一致。修正方案是在 `interrupt_handler()` 中增加 `IRQ_S_SOFT` 分支，输出 `Supervisor software interrupt`；默认分支改为 `Unknown interrupt: cause %d`，并调用 `print_trapframe(tf)` 输出现场信息。此次修改仅调整中断类型识别和诊断输出，不改变时钟中断计数及异常 EPC 更新逻辑。修正版随后以 Git 提交 `b3a4765` 上传至 `lab3` 分支。
+
+**提示词四：检查代码编译与测试结果**
+
+**提示词：**
+
+```text
+[PROMPT]
+指导成员 C 检查修改后的 trap.c 是否能够编译，
+并分析单文件编译、完整内核构建与运行测试的区别。
+
+[RELY]
+依赖当前 Lab3 工程、Makefile、
+RISC-V 交叉编译工具链、QEMU 及课程测试脚本。
+
+[GUARANTEE]
+提供正确的构建命令和执行目录。
+检查修改版 trap.c 是否成功编译。
+区分代码编译成功与系统运行正确。
+
+[SPECIFICATION]
+在 code 目录执行 make obj/kern/trap/trap.o。
+使用 make bin/ucore.img 检查镜像构建。
+通过 make grade 检查课程测试结果。
+不将编译成功直接认定为运行测试通过。
+不擅自修改其他组员的代码。
+```
+
+**AI 回答：**
+
+在工程的 `code` 目录执行 `make obj/kern/trap/trap.o`，可以单独检查 `trap.c` 的编译情况；执行 `make bin/ucore.img`，可以检查当前工程能否完成内核链接与镜像生成。实际修正版成功完成了上述编译与构建，并已提交至 GitHub。但编译成功只能证明代码在当前工具链下可以构建，不能直接证明 Trap 入口、上下文恢复、异常返回及时钟中断等运行行为完全正确。完整功能仍需结合其他模块和实际测试输出进行判断。
+
+**提示词五：整理实验报告和代码协作记录**
+
+**提示词：**
+
+```text
+[PROMPT]
+根据成员 C 已完成的 Lab3 工作，
+协助整理中断与异常处理模块的实验报告，
+说明功能实现、Spec、Prompt、迭代过程及实验原理。
+
+[RELY]
+依赖实际完成的 trap.c、
+成员 C 的编译记录与 Git 提交记录、
+Lab3 实验要求及现有 Markdown 报告结构。
+
+[GUARANTEE]
+说明 interrupt_handler() 和 exception_handler() 的实现。
+记录软件中断和未知中断输出格式修正过程。
+说明时钟中断、异常 EPC 和操作系统原理之间的关系。
+保留本人实际截取的代码和编译截图。
+
+[SPECIFICATION]
+采用 Markdown 格式。
+成员 C 的学号为 2413533。
+不覆盖成员 A、B 已完成的报告内容。
+不编造代码修改、测试结果或实验截图。
+prompt.md 作为独立的 AI 提示词记录。
+```
+
+**AI 回答：**
+
+成员 C 的实验报告应围绕时钟中断处理、软件中断及未知中断分类、非法指令与断点异常处理展开，分别说明所依赖的框架接口及实现逻辑。在迭代过程中重点记录初版功能实现、根据评分脚本修正诊断输出、完成单文件编译和镜像构建等实际工作。报告中使用本人操作截取的 `interrupt_handler()`、`exception_handler()` 和编译结果截图，并通过相对路径引用。对于测试结果，应明确区分个人构建记录与小组联合测试记录，避免将不同环境下的验证结果混为一谈。
