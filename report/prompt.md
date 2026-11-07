@@ -108,3 +108,84 @@ csrr s3, sbadaddr 指令及 RISC-V CSR 定义。
 **AI 回答：**
 
 可在 `code` 目录执行 `make obj/kern/trap/trapentry.o`，单独编译 `trapentry.S`。该方法不依赖 `trap.c` 中尚未完成的处理函数。实际修复 CSR 名称问题后，编译正常结束，说明汇编文件通过了当前工具链的检查。但编译成功不能证明上下文恢复在运行时完全正确，仍需要等待其他模块完成后，通过 `make qemu` 和 `make grade` 进行集成验证。
+
+---
+
+## 成员二：2413467-徐熙凯
+
+以下根据成员 B 的实际开发需求整理为四段式提示词，AI 回答为本次实现及验证过程的摘要。
+
+**提示词：**
+
+```text
+[PROMPT]
+检查 __alltraps 与 TrapFrame、trap()、__trapret 的关系，
+明确成员 B 需要实现的入口参数传递和返回调用。
+
+[RELY]
+依赖已有的 SAVE_ALL、RESTORE_ALL、struct trapframe，
+以及 void trap(struct trapframe *tf) 的签名和 RV64 ABI。
+
+[GUARANTEE]
+说明保存后 sp 指向哪里，第一个参数使用哪个寄存器，
+以及 C 函数返回后怎样继续恢复现场。
+
+[SPECIFICATION]
+以当前源码为依据，不改变 A/C 的实现或 TrapFrame 布局。
+区分普通函数返回与 sret，不假定所有 Trap 都返回用户态。
+```
+
+**AI 回答：**
+
+`SAVE_ALL` 分配 288 字节并保存现场后，`sp` 指向当前 TrapFrame。需要将该指针放入第一参数寄存器 `a0`，再通过正常函数调用进入 `trap()`。C 函数返回后，栈指针应恢复到调用前的位置，继续进入 `__trapret`。普通函数返回使用 `ra`，最终 Trap 返回使用 `sepc` 和保存的状态，二者不能混淆。
+
+**提示词：**
+
+```text
+[PROMPT]
+实现成员 B 的 Trap 入口与返回调用，并接通已有的中断处理流程。
+
+[RELY]
+成员 A 已完成 RESTORE_ALL，成员 C 已完成 interrupt_handler()
+和 exception_handler()；__trapret 和 sret 已经存在。
+
+[GUARANTEE]
+正确传入 TrapFrame 指针，调用 trap() 并衔接原返回流程。
+将对应 YOUR CODE 替换为学号 2413467。
+
+[SPECIFICATION]
+保存现场之后才能改写参数寄存器。
+调用前后 sp 保持同一 TrapFrame 基址，不重复调整栈空间。
+不改动 SAVE_ALL、RESTORE_ALL、trap.c、结构体或原有测试。
+本次不提交或上传 GitHub。
+```
+
+**AI 回答：**
+
+在 `SAVE_ALL` 后补充 `mv a0, sp` 和 `jal trap`。前者传入帧指针，后者生成有效的函数返回地址；`trap()` 返回后顺序进入已有的 `__trapret`。原 `a0` 和 `ra` 在调用前已由 `SAVE_ALL` 保存，因此可以由 `RESTORE_ALL` 恢复。除了 B 的标记和调用代码，其他成员的实现保持不变。
+
+**提示词：**
+
+```text
+[PROMPT]
+完成 B 后检查实际运行是否成功，运行 make grade，
+并根据真实测试结果填写成员 B 的报告。
+
+[RELY]
+使用仓库原有 Makefile、注入脚本及课程测试，
+使用现有 WSL RISC-V 工具链和 QEMU 环境。
+
+[GUARANTEE]
+验证寄存器上下文、断点返回、非法指令返回、兜底处理、
+持续时钟中断以及正常内核达到规定次数后的关机。
+保存原始输出，说明每项检查覆盖的行为。
+
+[SPECIFICATION]
+不修改测试来取得分数，不虚构截图或失败经历。
+区分评分内核与正常 make qemu 的运行结果。
+仅填写 B 的内容，并注明联合测试对 A/C 的验证范围。
+```
+
+**AI 回答：**
+
+先运行原有 `make grade`，核对三个评分项及总分，再重新构建正常内核执行 `make qemu`，检查计数输出和关机。接入前的真实问题是入口没有调用 C 处理函数，导致初始化后没有时钟统计。最终结果以 `report/verification/lab3-b-verification.txt` 的原始输出及实验报告测试章节为准。
