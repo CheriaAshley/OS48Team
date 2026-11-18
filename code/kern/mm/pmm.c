@@ -89,6 +89,92 @@ size_t nr_free_pages(void)
 
 //lab2 请补充你在lab2中的代码
 
+#define PHYSICAL_MEMORY_END (KERNTOP - PHYSICAL_MEMORY_OFFSET)
+#define KERNEL_BEGIN_PADDR (KERNBASE - PHYSICAL_MEMORY_OFFSET)
+
+static void page_init(void) {
+    // 1. 获取物理内存信息
+    uint64_t mem_base = get_memory_base();
+    uint64_t mem_size = get_memory_size();
+
+    // 2. 初始化地址转换偏移量
+    va_pa_offset = PHYSICAL_MEMORY_OFFSET;
+
+    // 3. 检查设备树返回的内存信息
+    if (mem_size == 0 || mem_base + mem_size < mem_base) {
+        panic("Invalid physical memory range");
+    }
+
+    // 4. 计算物理内存结束地址及页号上界
+    uint64_t mem_end = mem_base + mem_size;
+    npage = mem_end / PGSIZE;
+
+    // 5. 检查物理内存范围是否符合当前内核布局
+    if (mem_base != DRAM_BASE || mem_end > PHYSICAL_MEMORY_END) {
+        panic("Unsupported physical memory range");
+    }
+
+    // 6. 获取内核镜像结束位置
+    extern char end[];
+
+    uintptr_t kernel_end = ROUNDUP((uintptr_t)end, PGSIZE);
+
+    // 7. 检查内核结束位置
+    uintptr_t kernel_end_pa = PADDR(kernel_end);
+
+    if (kernel_end_pa < KERNEL_BEGIN_PADDR ||
+        kernel_end_pa > mem_end) {
+        panic("Invalid kernel end address");
+    }
+
+    // 8. 为物理页描述符数组分配空间
+    // pages[0] 对应 DRAM_BASE 处的物理页
+    pages = (struct Page *)kernel_end;
+
+    // 计算描述符数组所占用的空间
+    size_t page_count = npage - nbase;
+    size_t pages_size = page_count * sizeof(struct Page);
+
+    // 9. 计算描述符数组结束位置
+    uintptr_t pages_end = ROUNDUP(
+        (uintptr_t)pages + pages_size, PGSIZE
+    );
+
+    // 确保描述符数组没有超出物理内存范围
+    if (pages_end < (uintptr_t)pages ||
+        pages_end > (uintptr_t)(mem_end + va_pa_offset)) {
+        panic("Not enough memory for Page descriptors");
+    }
+
+    // 10. 初始化所有物理页描述符
+    for (size_t i = 0; i < page_count; i++) {
+        SetPageReserved(pages + i);
+        set_page_ref(pages + i, 0);
+        (pages + i)->property = 0;
+    }
+
+    // 11. 计算真正可用的物理内存起始地址
+    uintptr_t free_begin = PADDR(pages_end);
+    free_begin = ROUNDUP(free_begin, PGSIZE);
+
+    // 计算空闲物理页数量
+    if (free_begin >= mem_end) {
+        panic("No free physical memory");
+    }
+
+    size_t free_pages = (mem_end - free_begin) / PGSIZE;
+
+    // 12. 将空闲物理页交给内存管理器
+    init_memmap(pa2page(free_begin), free_pages);
+
+    // 13. 输出初始化结果，方便实验验证
+    cprintf("Physical memory base: 0x%016lx\n", mem_base);
+    cprintf("Physical memory size: %lu MB\n",
+            mem_size / (1024 * 1024));
+    cprintf("Total managed pages: %lu\n", page_count);
+    cprintf("Free pages: %lu\n", nr_free_pages());
+}
+
 static void enable_paging(void)
 {
     write_csr(satp, 0x8000000000000000 | (boot_pgdir_pa >> RISCV_PGSHIFT));
@@ -220,7 +306,57 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
     return NULL;
 }
 
-//LAB4 function1 YOUR CODE
+//LAB4 function1 2413195
+static void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
+{
+    if (!(*ptep & PTE_V))
+    {
+        return;
+    }
+
+    struct Page *page = pte2page(*ptep);
+    *ptep = 0;
+    tlb_invalidate(pgdir, la);
+
+    if (page_ref_dec(page) == 0)
+    {
+        free_page(page);
+    }
+}
+
+void page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    if (ptep != NULL)
+    {
+        page_remove_pte(pgdir, la, ptep);
+    }
+}
+
+int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
+{
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        return -E_NO_MEM;
+    }
+
+    if (!(*ptep & PTE_V) || pte2page(*ptep) != page)
+    {
+        page_remove_pte(pgdir, la, ptep);
+        page_ref_inc(page);
+    }
+
+    // Sv39 的可写页必须可读，无读写执行位的表项会被视为非叶表项。
+    if ((perm & PTE_W) || !(perm & (PTE_R | PTE_X)))
+    {
+        perm |= PTE_R;
+    }
+
+    *ptep = pte_create(page2ppn(page), perm);
+    tlb_invalidate(pgdir, la);
+    return 0;
+}
 
 
 
@@ -234,7 +370,7 @@ void tlb_invalidate(pde_t *pgdir, uintptr_t la)
 {
     // flush_tlb();
     // The flush_tlb flush the entire TLB, is there any better way?
-    asm volatile("sfence.vma %0" : : "r"(la));
+    asm volatile("sfence.vma %0" : : "r"(la) : "memory");
 }
 
 static void check_alloc_page(void)
