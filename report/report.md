@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 |------|------|
 | **实验名称** | Lab 4: 进程管理 |
-| **小组成员** | 2413195-钟沁涵、[成员 B 学号-姓名]、[成员 C 学号-姓名] |
+| **小组成员** | 2413195-钟沁涵、2413467-徐熙凯、[成员 C 学号-姓名] |
 | **完成日期** | [小组完成后填写] |
 
 ### 小组分工
@@ -15,7 +15,7 @@
 | 成员 | 负责的练习/模块 |
 |------|----------------|
 | 2413195-钟沁涵 | 模块一：虚拟内存页操作，迁移 Best Fit 和物理内存初始化，完成分页模式 Challenge。 |
-| [成员 B 学号-姓名] | 模块二：进程创建与初始化。 |
+| 2413467-徐熙凯 | 模块二：进程创建与初始化。 |
 | [成员 C 学号-姓名] | 模块三：进程调度与上下文切换，中断状态保存与恢复 Challenge，小组联调。 |
 
 实验报告如何分工？
@@ -41,7 +41,7 @@
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|------------|---------|------|
 | 2413195-钟沁涵 | ChatGPT | GPT-6 | Windows 11、WSL2 Ubuntu 22.04、VS Code Remote WSL，使用 Make 和 RISC-V 64 交叉编译工具链。 |
-| [成员 B 学号-姓名] | | | |
+| 2413467-徐熙凯 | Codex 桌面应用 | 未记录具体模型版本 | Windows、WSL2 Ubuntu，SiFive GCC 10.2.0、QEMU 4.1.1；在 WSL 编译验证。 |
 | [成员 C 学号-姓名] | | | |
 
 **说明：**
@@ -175,35 +175,56 @@ page_init() 的迁移位置，并协助实现 page_insert() 与 page_remove()。
 
 ### 功能模块：进程创建与初始化
 
-**负责人：** 成员 B（待填写学号和姓名）
+**负责人：** 2413467-徐熙凯（成员 B）
 
 #### 模块功能描述
 
-**需要实现/修改的函数：**
+本模块在 `kern/process/proc.c` 完成六个函数。`alloc_proc()` 分配并清零 PCB，设置初始状态 `PROC_UNINIT`、未分配 PID `-1`、内核页表物理地址及链表节点。`proc_init()` 初始化进程链表和 PID 哈希表，把当前启动现场包装为 PID 0 的 `idleproc`，复用 `bootstack`，设置 `current` 和重调度标记，再创建 PID 1、名为 `init` 的线程。
 
-<!-- 成员 B 填写函数签名。 -->
+`kernel_thread()` 构造临时 trapframe：`s0` 保存目标函数，`s1` 保存参数，`epc` 指向 `kernel_thread_entry`，设置 `SPP`、`SPIE` 并清除 `SIE`。它调用 `do_fork()`，由后者依次分配 PCB、内核栈、处理地址空间接口、构造首次执行现场，然后在保存并关闭本地中断的临界区内分配 PID、登记链表与哈希表、增加进程数并唤醒线程。返回值是新线程 PID；资源不足时返回负错误码。
 
-**功能说明：**
+`copy_mm()` 依据当前实验只创建内核线程的前提，断言 `current->mm == NULL`，保持新线程 `mm == NULL`，不实现用户地址空间复制。`copy_thread()` 把 trapframe 复制到新线程内核栈高端，设置子线程 `a0 = 0`，设置初始 `sp`，并令 `context.ra = forkret`、`context.sp = proc->tf`。非零传入栈地址保存在 `tf->gpr.sp`；内核线程传入零时使用 trapframe 地址。
 
-<!-- 成员 B 填写功能、主要场景和模块之间的调用关系。 -->
+首次执行的设计链路为 `switch_to -> forkret -> forkrets -> __trapret -> sret -> kernel_thread_entry -> init_main`。`context` 是供 `switch_to` 使用的精简调用现场，trapframe 则是供 `sret` 恢复的完整现场。骨架 `kernel_thread_entry` 用 `move a0, s1` 传参数，再用 `jalr s0` 调用线程函数，返回后调用 `do_exit()`。当前 `do_exit()` 的 panic 是实验骨架占位行为，不属于 B 的退出回收实现。
 
-#### 最终提示词
+#### 最终提示词与 Spec
 
-<!-- 成员 B 填写本模块的最终提示词及所依据的 Spec。 -->
+依赖条件是 RV64、已有 PMM/SLOB、`wakeup_proc()`、PID 分配与登记辅助函数，以及骨架首次运行入口。要求只补齐模块二六个函数，保留实验标记并填写学号，不覆盖 A 的内存模块或 C 的调度模块。PCB 必须初始化完整；创建失败不能登记半成品线程，且应按申请资源的逆序回收；成功后 PID 唯一、父子关系正确、状态为 `PROC_RUNNABLE`。地址空间仅支持本实验的内核线程场景。
 
-#### 实现迭代过程
+提示词及回答的整理见 [prompt.md](prompt.md) 的成员 B 部分。使用 AI 后同时检查代码、编译结果及运行断言，不能把单文件编译等同于全系统完成。
 
-##### 第一次迭代
+#### 实现迭代过程及验证
 
-<!-- 成员 B 填写遇到的问题、解决策略和实际验证结果。 -->
+2026-11-21 从远端 `lab4` 分支提交 `6d21c0b` 克隆独立工作目录。检查发现 A 的页映射与 Lab2 迁移代码已填写，C 的 `cpu_idle()`、`proc_run()`、`schedule()`、`switch_to()` 和 Lab3 迁移尚未填写，B 区域也是占位注释。按上述 Spec 补齐 B 六个函数，首次目标文件编译通过。
 
-##### 第二次迭代（如有）
+尝试原始 `make grade` 时，链接报告 `cpu_idle`、`schedule` 未定义；评分脚本随后未正常结束，由外层 15 秒超时终止。因此当前没有完整评分成绩，不能写成整组实验或首次调度已通过。
 
-<!-- 成员 B 填写。 -->
+为独立验证 A/B，在 WSL `/tmp` 的副本运行老师原有注入器，保留 PMM、Process Create 测试，在 `proc_init()` 返回后执行附加检查并主动关机。尚未完成的 C 函数仅使用遇到即 panic 的测试边界占位；不运行调度、不打开时钟中断。这些占位、注入和故障模拟仅存在于临时测试副本，没有写进提交代码，也没有修改仓库中的老师测试。
 
-##### 第三次迭代（如有）
+实际结果：
 
-<!-- 成员 B 填写。 -->
+```text
+check_alloc_page() succeeded!
+check_pgdir() succeeded!
+check_boot_pgdir() succeeded!
+[Test PMM] PASS
+[Test Process Create] PASS
+[B frame and first-entry setup] PASS
+[B failure cleanup and process limit] PASS
+[B PID, registration, explicit stack] PASS
+[B component tests] PASS (scheduler and trap return not exercised)
+```
+
+附加检查覆盖 trapframe 栈位置、入口及函数参数、SPP/SPIE/SIE、context、PID 哈希登记、父进程、独立内核栈和非零栈参数。故障注入覆盖 PCB 分配失败、内核栈分配失败、地址空间接口失败，以及进程数量达到上限；验证错误码、未新增进程、PCB 分配与回收计数匹配、空闲页数量不变。`copy_mm()` 在当前正常场景不会失败，其失败分支通过临时测试包装验证。记录见 [模块二验证记录](verification/lab4-b-verification.txt)。本轮没有发现 B 实现导致的断言失败，不虚构额外修复迭代。
+
+#### 与成员 C 的接口及待联调事项
+
+`context.ra/sp` 对应 `switch_to()` 恢复的 `ra/sp`；`forkrets()` 已在 Lab4 骨架中提供，迁移 Lab3 时必须保留。`RESTORE_ALL` 应恢复 trapframe 中的返回状态，尤其注意 `tf->gpr.sp` 的语义，不应机械复制只增加固定栈大小的旧实现。C 完成后需要使用原始 `make grade` 验证调度测试和 initproc 输出，实际跟踪首次执行链路。完整成绩以该次联调为准。
+
+#### 原理理解与 AI 协作
+
+创建线程需要把 PCB、内核栈、地址空间描述、初始执行现场和可运行状态组织成一致实体；创建成功不意味着已经获得 CPU，实际执行依赖调度与上下文切换。本实验内核线程共享内核地址空间，没有实现用户进程地址空间复制、写时复制及完整退出回收。AI 协作中需明确字段语义、模块边界和可观测验收条件；测试结果要区分静态现场准备、模块运行和整组调度，不能用测试占位替代未完成队友模块后宣称整组通过。
+
 
 ---
 

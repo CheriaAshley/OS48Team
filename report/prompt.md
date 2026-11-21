@@ -36,3 +36,41 @@ Lab4 的 `pmm_init()` 已经安排了页表检查和 `kmalloc_init()`。把旧�
 **AI 回答**
 
 `git diff --check` 无错误输出。`default_pmm.o is up to date` 表示已有的目标文件无需重新生成，`+ cc kern/mm/pmm.c` 后没有编译错误，说明新增页表代码通过了 RISC-V 单文件编译。推送日志中的 `7d91f6b..10de740 lab4 -> lab4` 表示远端 `lab4` 已更新到提交 `10de740`。目前可以在报告中填写编译和推送结果，并保留小组运行及评分截图的位置。
+
+
+## 成员 B · 2413467-徐熙凯
+
+以下按本次实际需求和实现约束整理，不作为逐字聊天记录。
+
+**我的提示词**
+
+- **任务目标**　先读 Lab4 指导书，克隆小组 lab4 分支，按分工检查队友完成情况，再实现我负责的进程创建与初始化。
+- **依赖依据**　指导书模块二、分工图、当前 proc_struct/context/trapframe 定义，以及 kernel_thread_entry、forkrets、PMM、SLOB 和已有进程辅助函数。
+- **预期结果**　完成 alloc_proc、proc_init、kernel_thread、do_fork、copy_thread、copy_mm，正确建立 idleproc 和可运行的 initproc。
+- **实现约束**　保留 Lab4 骨架接口和实验注释，模块二标记填写 2413467，只修改自己的模块；本地验证，不上传 GitHub。
+
+**AI 回答**
+
+远端基线为 6d21c0b。A 已实现物理内存迁移及页映射，C 的调度、上下文切换和 Lab3 迁移尚未填写。B 在 proc.c 中分配并初始化 PCB，复用启动栈建立 idleproc，再构造临时 trapframe，通过 do_fork 分配内核栈、设置父进程、复制现场并登记 PID。kernel_thread_entry 使用 s0 中的函数和 s1 中的参数，故初始 trapframe 必须与该入口一致。context.ra 指向 forkret，后续由 C 的切换代码连接首次运行。
+
+**我的提示词**
+
+- **任务目标**　明确创建失败时如何回收，并检查首次执行现场与现有汇编接口是否匹配。
+- **依赖依据**　setup_kstack、put_kstack、get_pid、hash_proc、wakeup_proc，以及本实验只创建内核线程的限制。
+- **预期结果**　资源不足返回负错误码；失败不挂入进程表；成功返回 PID，保存正确父进程和就绪状态。
+- **实现约束**　copy_mm 不实现用户地址空间复制；先构造完整现场，再在本地中断保护下登记、计数和唤醒。保留失败回收分支，不能用直接 panic 替代 do_fork 的资源不足返回。
+
+**AI 回答**
+
+alloc_proc 清零 PCB 并设置初始状态、PID 和内核页表地址。do_fork 先检查进程数上限，依次分配 PCB 和栈；栈分配失败释放 PCB，copy_mm 失败先释放栈再释放 PCB。copy_thread 将现场放入独立内核栈，设置子线程返回值 a0=0 和 context.ra/sp。kernel_thread 设置 SPP/SPIE 并清除 SIE。正常 copy_mm 断言 current->mm 为空，保留后续扩展接口。
+
+**验证要求整理**
+
+- **任务目标**　运行编译与评分，区分我的模块错误和队友尚未实现造成的限制。
+- **依赖依据**　仓库原有 make grade、tools/inject.py 和 test_lab4.c。
+- **预期结果**　记录实际输出；额外验证现场字段、PID 登记、失败回收和进程数上限。
+- **实现约束**　不修改老师测试；临时测试桩及故障注入不进入仓库，不把隔离测试写成完整评分通过。
+
+**AI 回答**
+
+B 与 A 的目标文件编译通过。原始评分在链接阶段因 C 的 cpu_idle/schedule 缺失失败，未产生完整成绩。在临时副本中保留原 PMM 和 Process Create 断言，于 proc_init 后结束运行，隔离未完成调度路径；二者及 B 的附加检查均通过。首次实际调度到 init_main、完整 make grade 和最终截图仍待 C 完成后联调。详见 report.md 和 verification/lab4-b-verification.txt。
