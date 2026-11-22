@@ -179,17 +179,53 @@ page_init() 的迁移位置，并协助实现 page_insert() 与 page_remove()。
 
 #### 模块功能描述
 
+本模块实现的接口如下。
+
+```c
+static struct proc_struct *alloc_proc(void);
+void proc_init(void);
+int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags);
+int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf);
+static void copy_thread(struct proc_struct *proc, uintptr_t esp,
+                        struct trapframe *tf);
+static int copy_mm(uint32_t clone_flags, struct proc_struct *proc);
+```
+
 本模块在 `kern/process/proc.c` 完成六个函数。`alloc_proc()` 分配并清零 PCB，设置初始状态 `PROC_UNINIT`、未分配 PID `-1`、内核页表物理地址及链表节点。`proc_init()` 初始化进程链表和 PID 哈希表，把当前启动现场包装为 PID 0 的 `idleproc`，复用 `bootstack`，设置 `current` 和重调度标记，再创建 PID 1、名为 `init` 的线程。
 
 `kernel_thread()` 构造临时 trapframe：`s0` 保存目标函数，`s1` 保存参数，`epc` 指向 `kernel_thread_entry`，设置 `SPP`、`SPIE` 并清除 `SIE`。它调用 `do_fork()`，由后者依次分配 PCB、内核栈、处理地址空间接口、构造首次执行现场，然后在保存并关闭本地中断的临界区内分配 PID、登记链表与哈希表、增加进程数并唤醒线程。返回值是新线程 PID；资源不足时返回负错误码。
 
 `copy_mm()` 依据当前实验只创建内核线程的前提，断言 `current->mm == NULL`，保持新线程 `mm == NULL`，不实现用户地址空间复制。`copy_thread()` 把 trapframe 复制到新线程内核栈高端，设置子线程 `a0 = 0`，设置初始 `sp`，并令 `context.ra = forkret`、`context.sp = proc->tf`。非零传入栈地址保存在 `tf->gpr.sp`；内核线程传入零时使用 trapframe 地址。
 
-首次执行的设计链路为 `switch_to -> forkret -> forkrets -> __trapret -> sret -> kernel_thread_entry -> init_main`。`context` 是供 `switch_to` 使用的精简调用现场，trapframe 则是供 `sret` 恢复的完整现场。骨架 `kernel_thread_entry` 用 `move a0, s1` 传参数，再用 `jalr s0` 调用线程函数，返回后调用 `do_exit()`。当前 `do_exit()` 的 panic 是实验骨架占位行为，不属于 B 的退出回收实现。
+首次执行的链路为 `switch_to -> forkret -> forkrets -> __trapret -> sret -> kernel_thread_entry -> init_main`。`context` 是供 `switch_to` 使用的精简调用现场，trapframe 则是供 `sret` 恢复的完整现场。骨架 `kernel_thread_entry` 用 `move a0, s1` 传参数，再用 `jalr s0` 调用线程函数，返回后调用 `do_exit()`。当前 `do_exit()` 的 panic 是实验骨架占位行为，不属于 B 的退出回收实现。
 
 #### 最终提示词与 Spec
 
 依赖条件是 RV64、已有 PMM/SLOB、`wakeup_proc()`、PID 分配与登记辅助函数，以及骨架首次运行入口。要求只补齐模块二六个函数，保留实验标记并填写学号，不覆盖 A 的内存模块或 C 的调度模块。PCB 必须初始化完整；创建失败不能登记半成品线程，且应按申请资源的逆序回收；成功后 PID 唯一、父子关系正确、状态为 `PROC_RUNNABLE`。地址空间仅支持本实验的内核线程场景。
+
+```text
+[PROMPT]
+结合 Lab4 指导书和现有骨架，实现 proc.c 中模块二的六个函数，
+说明 idleproc、initproc 的初始化及线程首次运行所需的现场。
+
+[RELY]
+RV64，已有物理页分配、SLOB、PID 与链表辅助函数、wakeup_proc，
+以及 proc_struct、context、trapframe、kernel_thread_entry、forkret、forkrets。
+
+[GUARANTEE]
+PCB 字段有确定初值，idleproc 复用启动现场，initproc 创建后可被调度。
+成功返回线程 PID，资源不足返回负错误码，失败时回收已申请资源。
+新线程登记前已经准备好独立内核栈和执行现场。
+
+[SPECIFICATION]
+alloc_proc 清零 PCB，设置 PROC_UNINIT、pid=-1、内核页表地址和链表节点。
+proc_init 建立 PID 0 的 idleproc、current 和 PID 1 的 initproc。
+kernel_thread 将函数和参数放入临时 trapframe 的 s0、s1，设置 epc 和状态位。
+do_fork 先分配资源并构造现场，再在本地中断保护下登记 PID、计数和唤醒。
+copy_thread 设置 trapframe、子线程 a0=0、context.ra=forkret 和 context.sp。
+copy_mm 按内核线程场景保持 mm=NULL，保留地址空间处理接口。
+保留实验标记并填写 2413467，使用原始 make grade 进行整组验收。
+```
 
 提示词及回答的整理见 [prompt.md](prompt.md) 的成员 B 部分。使用 AI 后同时检查代码、编译结果及运行断言，不能把单文件编译等同于全系统完成。
 
@@ -197,7 +233,7 @@ page_init() 的迁移位置，并协助实现 page_insert() 与 page_remove()。
 
 2026-11-21 从远端 `lab4` 分支提交 `6d21c0b` 克隆独立工作目录。检查发现 A 的页映射与 Lab2 迁移代码已填写，C 的 `cpu_idle()`、`proc_run()`、`schedule()`、`switch_to()` 和 Lab3 迁移尚未填写，B 区域也是占位注释。按上述 Spec 补齐 B 六个函数，首次目标文件编译通过。
 
-尝试原始 `make grade` 时，链接报告 `cpu_idle`、`schedule` 未定义；评分脚本随后未正常结束，由外层 15 秒超时终止。因此当前没有完整评分成绩，不能写成整组实验或首次调度已通过。
+尝试原始 `make grade` 时，链接报告 `cpu_idle`、`schedule` 未定义；评分脚本随后未正常结束，由外层 15 秒超时终止。这是 2026-11-21 模块独立开发阶段的结果，后续整组验收结果见下文。
 
 为独立验证 A/B，在 WSL `/tmp` 的副本运行老师原有注入器，保留 PMM、Process Create 测试，在 `proc_init()` 返回后执行附加检查并主动关机。尚未完成的 C 函数仅使用遇到即 panic 的测试边界占位；不运行调度、不打开时钟中断。这些占位、注入和故障模拟仅存在于临时测试副本，没有写进提交代码，也没有修改仓库中的老师测试。
 
@@ -215,11 +251,28 @@ check_boot_pgdir() succeeded!
 [B component tests] PASS (scheduler and trap return not exercised)
 ```
 
-附加检查覆盖 trapframe 栈位置、入口及函数参数、SPP/SPIE/SIE、context、PID 哈希登记、父进程、独立内核栈和非零栈参数。故障注入覆盖 PCB 分配失败、内核栈分配失败、地址空间接口失败，以及进程数量达到上限；验证错误码、未新增进程、PCB 分配与回收计数匹配、空闲页数量不变。`copy_mm()` 在当前正常场景不会失败，其失败分支通过临时测试包装验证。记录见 [模块二验证记录](verification/lab4-b-verification.txt)。本轮没有发现 B 实现导致的断言失败，不虚构额外修复迭代。
+附加检查覆盖 trapframe 栈位置、入口及函数参数、SPP/SPIE/SIE、context、PID 哈希登记、父进程、独立内核栈和非零栈参数。故障注入覆盖 PCB 分配失败、内核栈分配失败、地址空间接口失败，以及进程数量达到上限；验证错误码、未新增进程、PCB 分配与回收计数匹配、空闲页数量不变。`copy_mm()` 在当前正常场景不会失败，其失败分支通过临时测试包装验证。记录见 [模块二验证记录](verification/lab4-b-verification.txt)。本轮 B 实现通过了上述断言检查。
 
-#### 与成员 C 的接口及待联调事项
+#### 与成员 C 的接口及最终联调结果
 
-`context.ra/sp` 对应 `switch_to()` 恢复的 `ra/sp`；`forkrets()` 已在 Lab4 骨架中提供，迁移 Lab3 时必须保留。`RESTORE_ALL` 应恢复 trapframe 中的返回状态，尤其注意 `tf->gpr.sp` 的语义，不应机械复制只增加固定栈大小的旧实现。C 完成后需要使用原始 `make grade` 验证调度测试和 initproc 输出，实际跟踪首次执行链路。完整成绩以该次联调为准。
+2026-11-22 在 WSL 中检验合入 C 代码后的 `lab4` 提交 `a32ebc0`。实际使用 SiFive GCC 10.2.0、SiFive GDB 10.1 和 QEMU 4.1.1，执行原始 `make grade`，三项测试均通过，命令退出状态为 0。随后同步的 `c49ba2a` 补入报告和截图，实验代码与被测版本一致。
+
+```text
+check PMM:              OK
+check Process Create:   OK
+check Schedule:         OK
+Total Score: 30/30
+```
+
+![成员 B 环境下的 Lab4 原始评分结果](images/lab4_grade_final.png)
+
+Process Create 检查验证 idleproc 的 PID、状态、启动栈及初始字段，以及 initproc 的 PID、父进程、可运行状态和初始 context。Schedule 测试创建两个线程，让它们主动调度并记录运行标志，检查二者均执行过；评分还检查 initproc 的名称和输出字符串。这些结果验证了创建模块与 C 的调度、切换、Trap 返回代码在本实验路径上的衔接。完整评分输出摘要补入[模块二验证记录](verification/lab4-b-verification.txt)。
+
+首次执行时，`switch_to()` 从 `context.ra/sp` 恢复入口及栈，进入 `forkret()`，再通过 `forkrets(current->tf)` 把栈指针切到新线程的 trapframe，接着经 `__trapret` 恢复寄存器并执行 `sret`。`sepc` 来自事先设置的 `tf->epc`，因此跳到 `kernel_thread_entry`。此时 `s0` 是函数地址，`s1` 是参数，汇编把 `s1` 复制到 `a0` 后调用函数。`SPP=1` 使线程进入 S 模式，`SPIE=1` 用于返回时恢复中断使能，恢复前的 `SIE` 保持清零。
+
+当前 `RESTORE_ALL` 最后通过给 `sp` 加上 trapframe 大小恢复栈位置，首次运行后 `sp` 到达新线程内核栈顶。`copy_thread()` 虽然保存了传入的 `esp`，当前汇编没有从该槽位加载栈指针；本次整组验收覆盖的是 `kernel_thread()` 传入零的内核线程场景。此前隔离测试对非零栈参数只验证保存值，实际使用任意指定栈地址的返回路径仍需配合恢复汇编扩展。
+
+最初的链接失败已随 C 模块合入解决。原始评分在成员 B 环境中通过，形成从线程资源准备、登记就绪到实际执行的完整验证记录。更完整的用户地址空间复制及线程退出回收留待后续实验。
 
 #### 原理理解与 AI 协作
 
@@ -444,12 +497,15 @@ Sv39 从根页表到最底层需要向下走两次。`get_pte()` 的两段代码
 2. **2413195-钟沁涵：后续实验涉及的知识点。** 本模块采用预映射方式。按需分页、页面换入换出以及页面置换还需要结合缺页异常和后备存储实现。
 3. **2413533-蔡芷涵：已对应的操作系统原理。** 本模块涉及进程调度、上下文切换和临界区保护。`schedule()` 根据进程状态选择可运行线程，`proc_run()` 将调度结果落实到实际执行现场，`switch_to()` 保存和恢复 `ra`、`sp`、`s0`～`s11` 寄存器，使线程能够在不同执行阶段继续运行。`context` 主要用于线程切换，`trapframe` 则用于保存和恢复中断或异常现场。通过 `local_intr_save()` 和 `local_intr_restore()` 保存、关闭及恢复中断状态，保护调度过程中的关键操作。本实验还体现了进程创建与进程执行的区别：创建线程只是准备执行环境，真正运行还需要调度器和上下文切换机制。
 4. **2413533-蔡芷涵：后续实验涉及的知识点。** 本模块实现了内核线程的基本调度与上下文切换，但尚未完整实现优先级调度、多级反馈队列、复杂的时间片管理、多核负载均衡，以及完整的进程退出和资源回收机制。后续还需要进一步学习不同调度算法的性能差异、多处理器同步和更完整的进程生命周期管理。
-<!-- 成员 B在此补充各自负责部分对应的操作系统原理及小组总结。 -->
+5. **2413467-徐熙凯：已对应的操作系统原理。** PCB 保存线程身份、状态、资源和执行现场，PID 哈希表用于查找线程，进程链表供管理和调度使用。内核线程共享内核地址空间，同时拥有独立的内核栈和寄存器现场。`do_fork()` 先准备资源，再登记并唤醒，使线程从未初始化状态进入可运行状态；资源不足则按申请顺序逆序回收。`context` 保存切换所需的 `ra`、`sp`、`s0`～`s11`，trapframe 保存完整返回现场，两者共同实现新线程首次运行。调用约定决定入口函数与参数如何传递，`sret` 则根据事先准备的状态和入口地址继续执行。
+6. **2413467-徐熙凯：后续实验涉及的知识点。** 当前 `copy_mm()` 按内核线程场景保持 `mm == NULL`，用户进程的独立地址空间、地址空间复制和写时复制还需要后续实现。完整的退出、父进程等待及资源回收、用户程序装载和系统调用也是进程生命周期中的重要内容。本次失败回收测试只覆盖创建过程中已申请资源的撤销，退出后的生命周期管理需要进一步实现。
+
 ### AI 协作开发的经验
 
 **2413195-钟沁涵：** 迁移旧代码时，先给出旧版与新版的具体文件、实验标记和原有检查函数，可以更准确地定位需要复用的代码。设计页表接口时，把同页更新、换页、重复删除、分配失败分别写进 Spec，使实现后的检查有明确依据。完成修改后，用实际编译输出记录已验证的范围，并保留小组运行结果的位置。
 
-<!-- 成员 B在此补充各自的 AI 协作经验。 -->
+**2413467-徐熙凯：** 设计提示词时，我先提供六个函数的签名、PCB 与两种现场结构，以及 `kernel_thread_entry`、`forkret` 和 `forkrets` 的约定，再把初始化值、失败返回、登记顺序和验证条件写进 Spec。实现后先检查源码和目标文件编译，在队友调度模块尚未合入时用临时副本验证创建和失败回收；合入后再执行原始评分，取得 30/30。前期链接失败、模块断言通过和最终整组通过分别对应不同阶段，应根据实际输出更新结论。对 AI 生成的接口描述还需要核查最终调用链，例如当前非零 `esp` 只被存入 trapframe，是否真正恢复为执行栈必须同时检查汇编。
+
 **2413533-蔡芷涵：** 本次实验中，我主要借助 AI 完成进程调度与上下文切换模块的设计、代码修改及联调排错。在实现初期，先根据实验指导书明确 `cpu_idle()`、`schedule()`、`proc_run()` 和 `switch_to()` 的功能边界，再结合原有代码逐处修改，避免直接替换整个文件而破坏其他成员的工作。迁移 Lab3 中断处理代码时，也需要对照 Lab4 原有结构，特别注意保留 `forkrets` 等首次线程运行所需的接口。
 在联调阶段，AI 帮助分析 QEMU 启动异常、Sv39 页表映射、页错误及自动评分脚本的问题。但 AI 提出的判断并不一定正确，例如曾怀疑页表项缺少 `PTE_V`，进一步检查源码后发现已有接口会自动设置该标志，因此没有采用这一错误判断。后续通过查看实际代码、运行日志、异常地址和测试输出，逐步定位并解决问题。
 这次经历让我认识到，AI 更适合作为代码分析和调试辅助工具，不能替代实际验证。尤其是在多人协作项目中，需要明确各模块的责任边界，区分代码错误、接口不匹配和环境配置问题，并如实记录测试条件。例如，本次自动评分最初在本人 WSL 环境中无法正常完成，经过排查后在临时调整的评分环境中取得 30/30；后续小组也在其他成员的环境中使用原始评分命令取得满分。这让我认识到，实验验证不仅需要关注最终得分，也需要准确记录测试条件和排错过程。

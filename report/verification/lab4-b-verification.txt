@@ -63,3 +63,22 @@ check_vmm() succeeded.
 [B failure cleanup and process limit] PASS
 [B PID, registration, explicit stack] PASS
 [B component tests] PASS (scheduler and trap return not exercised)
+
+
+Final integrated verification, 2026-11-22
+Tested code revision: a32ebc0, lab4 branch.
+c49ba2a subsequently adds report/images only; experiment code is unchanged.
+Environment: WSL2 Ubuntu, SiFive GCC 10.2.0, SiFive GDB 10.1,
+QEMU 4.1.1 installed under /opt/riscv.
+Command: make grade GRADE_TMP=<unique temporary directory>
+The GRADE_TMP override isolates temporary output. The grader, tests and QEMU
+loading arguments are the original repository versions.
+Exit status: 0
+Results copied from the actual captured output:
+  -check PMM:                                OK
+  -check Process Create:                     OK
+  -check Schedule:                           OK
+Total Score: 30/30
+Screenshot: ../images/lab4_grade_final.png (existing team screenshot).
+Build emits existing pointer-type warnings in kmalloc.c and test_lab4.c.
+The final integrated checks supersede the earlier pending-scheduler status.

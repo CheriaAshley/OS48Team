@@ -73,7 +73,20 @@ alloc_proc 清零 PCB 并设置初始状态、PID 和内核页表地址。do_for
 
 **AI 回答**
 
-B 与 A 的目标文件编译通过。原始评分在链接阶段因 C 的 cpu_idle/schedule 缺失失败，未产生完整成绩。在临时副本中保留原 PMM 和 Process Create 断言，于 proc_init 后结束运行，隔离未完成调度路径；二者及 B 的附加检查均通过。首次实际调度到 init_main、完整 make grade 和最终截图仍待 C 完成后联调。详见 report.md 和 verification/lab4-b-verification.txt。
+B 与 A 的目标文件编译通过。原始评分在链接阶段因 C 的 cpu_idle/schedule 缺失失败，未产生完整成绩。在临时副本中保留原 PMM 和 Process Create 断言，于 proc_init 后结束运行，隔离未完成调度路径；二者及 B 的附加检查均通过。这是模块独立开发阶段的结果，后续完成情况见本节最后一轮验证记录。详见 report.md 和 verification/lab4-b-verification.txt。
+
+**我的提示词**
+
+- **任务目标**　C 已上传代码，克隆最新 lab4 分支，在我的 WSL 环境中运行原始 make grade，再检查和补齐成员 B 报告。
+- **依赖依据**　合入后的 proc.c、switch.S、trapentry.S，老师原始评分脚本、实际评分输出，以及报告已有的 lab4_grade_final.png 截图。
+- **预期结果**　验证线程创建与调度之间的衔接，补充最终评分、首次运行过程、OS 原理总结和 AI 协作经验。
+- **实现约束**　以实际执行结果为依据，保留前期模块测试的历史条件；报告需要说明最终汇编实际恢复栈指针的方式。
+
+**AI 回答**
+
+在合入 C 的代码提交 a32ebc0 上，使用 SiFive GCC 10.2.0、SiFive GDB 10.1、QEMU 4.1.1 执行原始 make grade，PMM、Process Create、Schedule 均为 OK，Total Score 为 30/30，退出状态为 0。后续 c49ba2a 补入报告截图，代码与该被测版本一致。
+
+创建测试确认 idleproc 和 initproc 的关键字段，调度测试确认新建线程实际执行并能够切换。首次运行经 switch_to、forkret、forkrets、__trapret、sret 到 kernel_thread_entry，再调用目标函数。当前 RESTORE_ALL 用 sp 加上现场大小恢复栈，适用于本次内核线程初始现场；copy_thread 中非零 esp 的存储检查仅验证字段值，任意指定栈的实际恢复还需要相应汇编支持。报告已补齐六个函数签名、Spec、最终联调结果和个人总结，并引用已有的原始评分截图。
 
 ---
 
